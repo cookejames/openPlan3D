@@ -16,7 +16,8 @@
   import { projectStore } from '$lib/services/projectStore';
   import { autoSave, markClean, saveState } from '$lib/stores/saveStatus';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
-  import { readOnly } from '$lib/stores/readOnly';
+  import { readOnly, readOnlyReason } from '$lib/stores/readOnly';
+  import { editLockState, editAnyway } from '$lib/stores/editLock';
   import { openSharedProject, leaveSharedView, saveSharedCopy } from '$lib/services/projectOpening';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
   import BuildPanel from '$lib/components/sidebar/BuildPanel.svelte';
@@ -271,11 +272,31 @@
 {#if ready}
   <div class="h-screen flex flex-col overflow-hidden">
     <TopBar onToggleLayers={() => showLayers = !showLayers} layersOpen={showLayers} onToggleHistory={toggleHistory} historyOpen={showUndoHistory} />
-    {#if $readOnly}
+    {#if $readOnlyReason === 'share'}
       <div data-testid="share-banner" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-blue-50 border-b border-blue-200 px-4 py-1.5 text-sm text-blue-900">
         <span class="flex-1 min-w-48 truncate">{$t('shareView.banner', { name: $currentProject?.name ?? '' })}</span>
         {#if copyError}<span role="alert" class="text-red-700">{$t('shareView.saveFailed', { message: copyError })}</span>{/if}
         <button class="font-semibold underline disabled:opacity-50" disabled={copyBusy} onclick={saveCopyHere}>{copyBusy ? $t('shareView.saving') : $t('shareView.saveCopy')}</button>
+      </div>
+    {/if}
+    {#if $readOnlyReason === 'lock'}
+      {@const lk = $editLockState}
+      {@const name = lk.holderEmail ?? ''}
+      <div data-testid="lock-banner" role="status" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-sm text-amber-900">
+        <span class="flex-1 min-w-48">
+          {#if lk.notice === 'finished'}
+            {lk.holderEmail && !lk.holderIsSelf ? $t('editor.lock.finished', { name }) : $t('editor.lock.finishedSelf')}
+          {:else if lk.notice === 'tookOver'}
+            {lk.holderIsSelf ? $t('editor.lock.tookOverSelf') : $t('editor.lock.tookOver', { name })}
+          {:else}
+            {lk.holderIsSelf ? $t('editor.lock.viewingSelf') : $t('editor.lock.viewing', { name })}
+          {/if}
+          {#if lk.notice !== 'finished'}<span class="text-amber-700"> · {$t('editor.lock.editAnywayHint')}</span>{/if}
+        </span>
+        {#if lk.error}<span role="alert" class="text-red-700">{$t('editor.lock.failed', { message: projectServiceMessage(lk.error, $locale) })}</span>{/if}
+        <button class="font-semibold underline disabled:opacity-50" disabled={lk.busy} onclick={() => void editAnyway()}>
+          {lk.busy ? $t('editor.lock.working') : lk.notice === 'finished' ? $t('editor.lock.editNow') : $t('editor.lock.editAnyway')}
+        </button>
       </div>
     {/if}
     <!-- Keep canvas/viewer controls beneath toolbar menus and project dialogs. -->

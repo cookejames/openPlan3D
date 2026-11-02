@@ -30,7 +30,8 @@
   import { saveState, saveError, lastSavedAt, manualSave, autoSave, initAutoSave } from '$lib/stores/saveStatus';
   import { initVersionHistory, stopVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
   import VersionHistoryPanel from './VersionHistoryPanel.svelte';
-  import { readOnly } from '$lib/stores/readOnly';
+  import { readOnly, readOnlyReason } from '$lib/stores/readOnly';
+  import { startEditLock } from '$lib/stores/editLock';
   import AccountButton from '$lib/components/AccountButton.svelte';
   import { authState } from '$lib/stores/auth';
   import { projectStore } from '$lib/services/projectStore';
@@ -277,6 +278,7 @@
   onMount(() => {
     const stopAutoSave = initAutoSave();
     const stopCloudWatch = startCloudWatch();
+    const stopEditLock = startEditLock();
     initVersionHistory();
     const openSettings = () => { if (!hasOpenModal()) settingsOpen = true; };
     window.addEventListener('open-settings', openSettings);
@@ -311,6 +313,7 @@
       if (get(saveState) === 'unsaved') void autoSave();
       stopAutoSave();
       stopCloudWatch();
+      stopEditLock();
       stopVersionHistory();
       document.removeEventListener('click', handleClickOutside, true);
       document.removeEventListener('keydown', handleKeydown, true);
@@ -714,12 +717,16 @@
     {/if}
     </span>
   </span>
-  {#if syncLabelKey}
+  {/if}
+  {#if (!$readOnly || $readOnlyReason === 'lock') && syncLabelKey}
     <span data-testid="sync-status" class="shrink-0 whitespace-nowrap text-[11px] font-medium max-xl:hidden {syncTone}">{$t(syncLabelKey)}</span>
   {/if}
+  {#if !$readOnly}
   <button onclick={save} class="px-3 py-1.5 max-xl:px-2.5 text-sm bg-white text-slate-800 font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
     {$t('saveControls.save')}
   </button>
+  {/if}
+  {#if !$readOnly || $readOnlyReason === 'lock'}
   <AccountButton variant="toolbar" />
   {/if}
 </div>

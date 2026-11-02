@@ -2,7 +2,7 @@ import { derived, get, writable } from 'svelte/store';
 import { currentProject, loadProject } from './project';
 import { saveState, markClean, autoSave } from './saveStatus';
 import { authState } from './auth';
-import { readOnly } from './readOnly';
+import { readOnly, readOnlyReason } from './readOnly';
 import { projectStore } from '$lib/services/projectStore';
 import { storageErrorMessage } from '$lib/services/datastore';
 
@@ -18,6 +18,8 @@ export function handleRemoteChange(id: string, change: { updatedBy: string }) {
   if (get(currentProject)?.id !== id) return;
   const status = get(projectStore.syncStatus)[id];
   if (status === 'conflict') return;
+  // Locked view (another session is editing): follow the holder silently, no notice.
+  if (get(readOnlyReason) === 'lock') { void reloadLatest(); return; }
   const pending = get(saveState) !== 'saved' || status === 'syncing' || status === 'offline' || status === 'error';
   if (pending) {
     projectStore.markConflict(id);
