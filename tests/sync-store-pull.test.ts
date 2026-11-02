@@ -79,7 +79,7 @@ describe('sync store pull', () => {
       expect(s.local.adopt).toHaveBeenCalledWith('p1', await s.cloud.downloadLatest.mock.results[0].value);
       expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
       expect(st(s)).toBe('synced');
-      expect(get(s.store.cloudMeta).p1).toEqual({ ownerUid: 'u', isOwner: true, updatedBy: 'a@b.c' });
+      expect(get(s.store.cloudMeta).p1).toMatchObject({ ownerUid: 'u', isOwner: true, updatedBy: 'a@b.c' });
       s.store.dispose();
     });
 

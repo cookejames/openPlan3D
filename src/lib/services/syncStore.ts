@@ -8,7 +8,13 @@ import { readRecord, type CloudSyncMeta } from './localDatabase';
 export type SyncStatus = 'local' | 'synced' | 'syncing' | 'offline' | 'conflict' | 'error' | 'cloud';
 // 'cloud' = in the cloud, not yet in this browser.
 
-export type CloudMetaInfo = { ownerUid: string; isOwner: boolean; updatedBy: string };
+export type CloudMetaInfo = {
+  ownerUid: string;
+  isOwner: boolean;
+  updatedBy: string;
+  editorEmails: string[];
+  shareToken: string | null;
+};
 
 export interface SyncStore extends DataStore {
   syncStatus: Readable<Record<string, SyncStatus>>;
@@ -20,6 +26,11 @@ export interface SyncStore extends DataStore {
   keepMineAsCopy(id: string): Promise<Project>;
   flush(id?: string): Promise<void>;
   uploadToCloud(id: string): Promise<void>;
+  /** Owner only. Resolves to the stored (normalised) editor list. */
+  setEditors(id: string, emails: string[]): Promise<string[]>;
+  /** Flushes pending edits, then publishes a read-only snapshot. Resolves to the share token. */
+  enableSharing(id: string): Promise<string>;
+  disableSharing(id: string): Promise<void>;
   /** Clear timers and listeners. */
   dispose(): void;
 }
@@ -72,7 +83,13 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
 
   const cloudInfo = writable<Record<string, CloudMetaInfo>>({});
   const noteCloud = (m: CloudProjectMeta) => {
-    const info = { ownerUid: m.ownerUid, isOwner: m.ownerUid === deps.user()?.uid, updatedBy: m.updatedBy };
+    const info: CloudMetaInfo = {
+      ownerUid: m.ownerUid,
+      isOwner: m.ownerUid === deps.user()?.uid,
+      updatedBy: m.updatedBy,
+      editorEmails: m.editorEmails,
+      shareToken: m.shareToken,
+    };
     cloudInfo.update(all => ({ ...all, [m.id]: info }));
   };
   const forget = (id: string) => {
@@ -164,9 +181,11 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     conflicted.delete(id);
     setStatus(id, 'syncing');
     let newRev: number;
+    let pushedRaw = '';
     try {
       const raw = await readLocal(id);
       if (raw === null) { setStatus(id, 'local'); return; }
+      pushedRaw = raw;
       const name = (JSON.parse(raw) as Project).name;
       newRev = await cloud.pushRevision(id, meta.pendingBaseRev, raw, name);
     } catch (error) {
@@ -190,7 +209,13 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     }
     if (again) { setStatus(id, 'syncing'); schedule(id, PUSH_DELAY); }
     else setStatus(id, 'synced');
-    // TODO(chunk 16): share snapshot
+    // Keep the public snapshot current. The token comes from the cached cloudMeta (filled by load/list and
+    // the share methods), so a push costs no extra Firestore read; if another editor enabled sharing since
+    // we last looked, the snapshot catches up on the next load. Best effort: never affects sync status.
+    const shareToken = get(cloudInfo)[id]?.shareToken;
+    if (shareToken && !again) {
+      try { await cloud.updateShareSnapshot(shareToken, pushedRaw); } catch (error) { console.warn('Could not update the share snapshot', error); }
+    }
     try { await cloud.pruneRevs(id, newRev, KEEP_REVS); } catch { /* best effort */ }
   }
 
@@ -220,6 +245,18 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     const project = await local.load(id);
     if (!project) throw new Error('Project not found');
     return project;
+  }
+
+  /** Throws unless signed in with a cloud-tracked project; seeds cloudMeta if it was not loaded yet. */
+  async function requireTracked(id: string): Promise<void> {
+    if (!cloud || !deps.user()) throw new Error('Sign in to sync projects');
+    const meta = await deps.meta.read(id);
+    if (!meta || meta.knownRev === null) throw new Error('Upload this project to the cloud first');
+    if (!get(cloudInfo)[id]) {
+      const cm = await cloud.readMeta(id);
+      if (!cm) throw new Error('This project is no longer available in the cloud');
+      noteCloud(cm);
+    }
   }
 
   return {
@@ -364,6 +401,29 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       await cloud.createProject(project);
       await deps.meta.write(id, { knownRev: 0, pendingBaseRev: null });
       setStatus(id, 'synced');
+    },
+
+    async setEditors(id, emails) {
+      await requireTracked(id);
+      const list = await cloud!.setEditors(id, emails);
+      cloudInfo.update(all => (all[id] ? { ...all, [id]: { ...all[id], editorEmails: list } } : all));
+      return list;
+    },
+
+    async enableSharing(id) {
+      await requireTracked(id);
+      await push(id);
+      const raw = await readLocal(id);
+      if (raw === null) throw new Error('Project not found');
+      const token = await cloud!.enableSharing(id, raw);
+      cloudInfo.update(all => (all[id] ? { ...all, [id]: { ...all[id], shareToken: token } } : all));
+      return token;
+    },
+
+    async disableSharing(id) {
+      await requireTracked(id);
+      await cloud!.disableSharing(id);
+      cloudInfo.update(all => (all[id] ? { ...all, [id]: { ...all[id], shareToken: null } } : all));
     },
 
     dispose() {

@@ -4,7 +4,7 @@ import { connectAuthEmulator, getAuth, GoogleAuthProvider, signInWithCredential,
 import { connectFirestoreEmulator, doc, getFirestore, updateDoc } from 'firebase/firestore';
 import { connectStorageEmulator, getStorage, ref, getBytes } from 'firebase/storage';
 import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { createCloudStore } from '$lib/services/cloudStore';
+import { createCloudStore, readSharedSnapshot, ShareNotFoundError } from '$lib/services/cloudStore';
 import { ProjectConflictError } from '$lib/services/datastore';
 import type { Project } from '$lib/models/types';
 
@@ -232,6 +232,105 @@ describe('cloudStore (emulator)', () => {
     await alice.store.createProject(makeProject('p12'));
     expect(await eve.store.readMeta('p12')).toBeNull();
     expect(await eve.store.listProjects()).toEqual([]);
+  });
+});
+
+describe('sharing (emulator)', () => {
+  const TOKEN_RE = /^[a-f0-9]{32}$/;
+  const withEditor = async (id: string) => {
+    await alice.store.createProject(makeProject(id));
+    await alice.store.setEditors(id, ['bob@example.com']);
+  };
+  const shareDocExists = async (token: string) => {
+    let exists = false;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const { getDoc, doc: d } = await import('firebase/firestore');
+      exists = (await getDoc(d(ctx.firestore(), 'shares', token))).exists();
+    });
+    return exists;
+  };
+
+  it('setEditors normalises, dedupes and keeps the owner', async () => {
+    await alice.store.createProject(makeProject('s1'));
+    const list = await alice.store.setEditors('s1', [' Bob@Example.com ', 'bob@example.com', '', 'carol@example.com']);
+    expect(list).toEqual(['alice@example.com', 'bob@example.com', 'carol@example.com']);
+    expect((await alice.store.readMeta('s1'))!.editorEmails).toEqual(list);
+    expect(await alice.store.setEditors('s1', [])).toEqual(['alice@example.com']);
+    await expect(alice.store.setEditors('s1', ['not-an-email'])).rejects.toThrow('Invalid email');
+  });
+
+  it('non-owner setEditors throws', async () => {
+    await withEditor('s2');
+    await expect(bob.store.setEditors('s2', ['eve@example.com'])).rejects.toThrow('Only the project owner');
+    expect((await alice.store.readMeta('s2'))!.editorEmails).toEqual(['alice@example.com', 'bob@example.com']);
+  });
+
+  it('enableSharing creates doc, snapshot and token; anonymous reads it; second call reuses token', async () => {
+    await alice.store.createProject(makeProject('s3'));
+    const token = await alice.store.enableSharing('s3', '{"v":1}');
+    expect(token).toMatch(TOKEN_RE);
+    expect((await alice.store.readMeta('s3'))!.shareToken).toBe(token);
+    expect(await shareDocExists(token)).toBe(true);
+    // eve's storage instance has no relation to the project: the read works without being an editor.
+    expect(await readSharedSnapshot(eve.storage, token)).toBe('{"v":1}');
+    expect(await alice.store.enableSharing('s3', '{"v":2}')).toBe(token);
+    expect(await readSharedSnapshot(eve.storage, token)).toBe('{"v":2}');
+  });
+
+  it('readSharedSnapshot works with no signed-in user', async () => {
+    await alice.store.createProject(makeProject('s3b'));
+    const token = await alice.store.enableSharing('s3b', '{"anon":true}');
+    const app = initializeApp({ projectId: PROJECT_ID, apiKey: 'fake', storageBucket: BUCKET }, `anon-${counter++}`);
+    apps.push(app);
+    const storage = getStorage(app);
+    connectStorageEmulator(storage, '127.0.0.1', 9199);
+    expect(await readSharedSnapshot(storage, token)).toBe('{"anon":true}');
+  });
+
+  it('updateShareSnapshot overwrites the bytes', async () => {
+    await alice.store.createProject(makeProject('s4'));
+    const token = await alice.store.enableSharing('s4', '{"a":1}');
+    await alice.store.updateShareSnapshot(token, '{"a":2}');
+    expect(await readSharedSnapshot(eve.storage, token)).toBe('{"a":2}');
+  });
+
+  it('disableSharing removes snapshot, share doc and token', async () => {
+    await alice.store.createProject(makeProject('s5'));
+    const token = await alice.store.enableSharing('s5', '{}');
+    await alice.store.disableSharing('s5');
+    expect((await alice.store.readMeta('s5'))!.shareToken).toBeNull();
+    expect(await shareDocExists(token)).toBe(false);
+    await expect(readSharedSnapshot(eve.storage, token)).rejects.toBeInstanceOf(ShareNotFoundError);
+    await alice.store.disableSharing('s5'); // idempotent
+  });
+
+  it('an editor who is not the owner can enable and disable sharing', async () => {
+    await withEditor('s6');
+    const token = await bob.store.enableSharing('s6', '{"by":"bob"}');
+    expect(await readSharedSnapshot(eve.storage, token)).toBe('{"by":"bob"}');
+    expect((await alice.store.readMeta('s6'))!.shareToken).toBe(token);
+    await bob.store.disableSharing('s6');
+    await expect(readSharedSnapshot(eve.storage, token)).rejects.toBeInstanceOf(ShareNotFoundError);
+  });
+
+  it('a non-editor cannot enable sharing', async () => {
+    await alice.store.createProject(makeProject('s7'));
+    await expect(eve.store.enableSharing('s7', '{}')).rejects.toThrow();
+  });
+
+  it('deleteProject with sharing on cleans up the snapshot and share doc', async () => {
+    await alice.store.createProject(makeProject('s8'));
+    const token = await alice.store.enableSharing('s8', '{}');
+    await alice.store.deleteProject('s8');
+    await expectDocAbsent('s8');
+    expect(await shareDocExists(token)).toBe(false);
+    await expect(readSharedSnapshot(eve.storage, token)).rejects.toBeInstanceOf(ShareNotFoundError);
+  });
+
+  it('readSharedSnapshot rejects a malformed token without a network call', async () => {
+    const storage = { _bad: true } as never; // any network use would throw a different error
+    await expect(readSharedSnapshot(storage, '../projects/x')).rejects.toBeInstanceOf(ShareNotFoundError);
+    await expect(readSharedSnapshot(storage, 'ABCDEF')).rejects.toBeInstanceOf(ShareNotFoundError);
   });
 });
 

@@ -24,6 +24,39 @@ export type CloudProjectMeta = {
   shareToken: string | null;
 };
 
+/** Thrown when a share link is malformed, was revoked, or its snapshot is gone. */
+export class ShareNotFoundError extends Error {
+  constructor() {
+    super('This share link is not available');
+    this.name = 'ShareNotFoundError';
+  }
+}
+
+const SHARE_TOKEN_RE = /^[a-f0-9]{32}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+const sharePath = (token: string) => `shared/${token}.json`;
+
+function newShareToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Public URL a viewer opens for a share token. */
+export function shareUrl(token: string, origin: string): string {
+  return `${origin}/editor?share=${token}`;
+}
+
+/** Reads a public share snapshot. Needs no sign-in. Throws ShareNotFoundError for bad or revoked tokens. */
+export async function readSharedSnapshot(storage: FirebaseStorage, token: string): Promise<string> {
+  if (!SHARE_TOKEN_RE.test(token)) throw new ShareNotFoundError();
+  try {
+    return new TextDecoder().decode(await getBytes(ref(storage, sharePath(token))));
+  } catch (error) {
+    if (isNotFound(error)) throw new ShareNotFoundError();
+    throw error;
+  }
+}
+
 export interface CloudStoreDeps {
   db: Firestore;
   storage: FirebaseStorage;
@@ -87,7 +120,31 @@ export function createCloudStore(deps: CloudStoreDeps) {
     return new TextDecoder().decode(await getBytes(ref(storage, path)));
   }
 
-  return {
+  const shareDoc = (token: string) => doc(db, 'shares', token);
+
+  async function updateShareSnapshot(token: string, json: string): Promise<void> {
+    me();
+    await uploadBytes(ref(storage, sharePath(token)), bytesOf(json), {
+      contentType: 'application/json',
+      cacheControl: 'no-cache',
+    });
+  }
+
+  /** Order matters: Storage rules authorise through the shares doc, so the snapshot goes first. */
+  async function removeShare(id: string, token: string): Promise<void> {
+    await removeQuietly(sharePath(token));
+    // Rules deny deleting a missing doc, so only delete when it exists.
+    if ((await getDoc(shareDoc(token))).exists()) await deleteDoc(shareDoc(token));
+    await updateDoc(projectDoc(id), { shareToken: null });
+  }
+
+  async function readMetaOrThrow(id: string): Promise<CloudProjectMeta> {
+    const meta = await store.readMeta(id);
+    if (!meta) throw new Error('This project is not available in the cloud');
+    return meta;
+  }
+
+  const store = {
     async listProjects(): Promise<CloudProjectMeta[]> {
       const user = me();
       const snap = await getDocs(query(collection(db, 'projects'), where('editorEmails', 'array-contains', user.email)));
@@ -212,7 +269,9 @@ export function createCloudStore(deps: CloudStoreDeps) {
     },
 
     async deleteProject(id: string): Promise<void> {
-      me();
+      const user = me();
+      const current = await store.readMeta(id);
+      if (current?.shareToken && current.ownerUid === user.uid) await removeShare(id, current.shareToken);
       const walk = async (folder: ReturnType<typeof ref>): Promise<void> => {
         const { items, prefixes } = await listAll(folder);
         for (const item of items) await removeQuietly(item.fullPath);
@@ -233,7 +292,61 @@ export function createCloudStore(deps: CloudStoreDeps) {
       me();
       return onSnapshot(projectDoc(id), (snap) => cb(snap.exists() ? toMeta(snap.id, snap.data()) : null));
     },
+
+    /** Owner only. Emails are trimmed, lower-cased and de-duplicated; the owner always stays. */
+    async setEditors(id: string, emails: string[]): Promise<string[]> {
+      const user = me();
+      const meta = await readMetaOrThrow(id);
+      if (meta.ownerUid !== user.uid) throw new Error('Only the project owner can change who can edit it');
+      const list = new Set<string>([user.email.toLowerCase()]);
+      for (const raw of emails) {
+        const email = raw.trim().toLowerCase();
+        if (!email) continue;
+        if (!EMAIL_RE.test(email)) throw new Error(`Invalid email address: ${raw.trim()}`);
+        list.add(email);
+      }
+      const editorEmails = [...list];
+      await updateDoc(projectDoc(id), { editorEmails });
+      return editorEmails;
+    },
+
+    /** Returns the share token, creating the share (and snapshot) if the project has none yet. */
+    async enableSharing(id: string, json: string): Promise<string> {
+      const user = me();
+      const meta = await readMetaOrThrow(id);
+      if (meta.shareToken) {
+        await updateShareSnapshot(meta.shareToken, json);
+        return meta.shareToken;
+      }
+      const token = newShareToken();
+      const email = user.email.toLowerCase();
+      // 1. shares doc first: the Storage rules look it up to authorise the snapshot write.
+      await setDoc(shareDoc(token), { projectId: id, createdBy: email });
+      try {
+        await updateShareSnapshot(token, json); // 2
+      } catch (error) {
+        await deleteDoc(shareDoc(token)).catch(() => {});
+        throw error;
+      }
+      try {
+        await updateDoc(projectDoc(id), { shareToken: token }); // 3
+      } catch (error) {
+        await removeQuietly(sharePath(token)).catch(() => {});
+        await deleteDoc(shareDoc(token)).catch(() => {});
+        throw error;
+      }
+      return token;
+    },
+
+    updateShareSnapshot,
+
+    async disableSharing(id: string): Promise<void> {
+      me();
+      const meta = await readMetaOrThrow(id);
+      if (meta.shareToken) await removeShare(id, meta.shareToken);
+    },
   };
+  return store;
 }
 
 export type CloudStore = ReturnType<typeof createCloudStore>;
