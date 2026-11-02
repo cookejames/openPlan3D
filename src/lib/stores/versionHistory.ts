@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { readOnly } from '$lib/stores/readOnly';
 import { currentProject, loadProject } from './project';
 import { readProject } from '$lib/utils/projectValidation';
 import type { Project } from '$lib/models/types';
@@ -71,6 +72,7 @@ async function appendSnapshot(project: Project, description: string, onlyIfChang
 }
 
 export async function saveSnapshot(project: Project, description: string, onlyIfChanged = false) {
+  if (get(readOnly)) return false;
   try { await appendSnapshot(project, description, onlyIfChanged); return true; }
   catch { return false; }
 }

@@ -3,6 +3,7 @@ import { currentProject, loadProject } from './project';
 import { storageErrorMessage, ProjectConflictError, PROJECTS_STORAGE_KEY, LIBRARY_CHANGE_KEY } from '$lib/services/datastore';
 import { projectStore } from '$lib/services/projectStore';
 import { saveSnapshot } from '$lib/stores/versionHistory';
+import { readOnly } from '$lib/stores/readOnly';
 import type { Project } from '$lib/models/types';
 
 export type SaveState = 'saved' | 'unsaved' | 'saving';
@@ -81,6 +82,7 @@ function clearSaveTimer() {
 
 /** Mark project as dirty (unsaved). */
 export function markDirty() {
+  if (get(readOnly)) return;
   revision++;
   saveState.set('unsaved');
   clearSaveTimer();
@@ -119,6 +121,8 @@ function scheduleThumbnail(project: Project) {
 /** Saves remain local; failures leave the current project available for export. */
 async function persist(manual: boolean): Promise<boolean> {
   clearSaveTimer();
+  // A shared plan is never written; there is nothing to save, so leaving is never blocked.
+  if (get(readOnly)) return true;
   const p = get(currentProject);
   if (!p) return false;
   if (lastProjectId !== p.id) {
@@ -159,6 +163,7 @@ export function autoSave() { return persist(false); }
 
 /** Manual save */
 export async function manualSave() {
+  if (get(readOnly)) return true;
   const ok = await persist(true);
   const id = get(currentProject)?.id;
   if (ok && id) {
@@ -171,7 +176,7 @@ export async function manualSave() {
 export async function saveCurrentAsCopy(): Promise<boolean> {
   if (get(savingCopy)) return false;
   const project = get(currentProject);
-  if (!project) return false;
+  if (!project || get(readOnly)) return false;
   clearSaveTimer();
   saveAttempt++;
   const copyingRevision = revision;

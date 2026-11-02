@@ -6,6 +6,9 @@ import { readProject } from '$lib/utils/projectValidation';
 import { ProjectConflictError } from './datastore';
 import { projectStore } from './projectStore';
 import { prepareToLeave } from './deployment';
+import { readOnly } from '$lib/stores/readOnly';
+import { storage } from '$lib/firebase';
+import { readSharedSnapshot, ShareNotFoundError } from './cloudStore';
 
 let latestRequest = 0;
 
@@ -90,4 +93,42 @@ export async function openStoredProject(id: string, signal?: AbortSignal): Promi
     if (superseded()) return null;
     throw error;
   }
+}
+
+export type SharedOpenResult =
+  | { status: 'ok'; project: Project }
+  | { status: 'notFound' }
+  | { status: 'unavailable' }
+  | { status: 'error'; error: unknown };
+
+/**
+ * Open a public share link read-only. Nothing is written anywhere: the project is
+ * only held in memory until the viewer explicitly saves a copy.
+ */
+export async function openSharedProject(token: string, signal?: AbortSignal): Promise<SharedOpenResult> {
+  if (!storage) return { status: 'unavailable' };
+  let project: Project;
+  try {
+    project = readProject(JSON.parse(await readSharedSnapshot(storage, token)));
+  } catch (error) {
+    if (error instanceof ShareNotFoundError) return { status: 'notFound' };
+    return { status: 'error', error };
+  }
+  if (signal?.aborted) return { status: 'error', error: new Error('Aborted') };
+  // Whatever plan this tab already holds is preserved before it is replaced.
+  if (!await prepareToLeave()) {
+    return { status: 'error', error: new Error(get(saveError) ?? 'Your current plan could not be saved.') };
+  }
+  readOnly.set(true);
+  loadProject(project);
+  markClean();
+  return { status: 'ok', project };
+}
+
+/** Leave read-only mode (the shared plan stays only in memory). */
+export function leaveSharedView() { readOnly.set(false); }
+
+/** Keep a private, editable copy of the open shared plan in this browser only. Returns its new id. */
+export async function saveSharedCopy(project: Project): Promise<string> {
+  return (await projectStore.saveCopy(project, 'Shared copy')).id;
 }

@@ -30,6 +30,7 @@
   import { saveState, saveError, lastSavedAt, manualSave, autoSave, initAutoSave } from '$lib/stores/saveStatus';
   import { initVersionHistory, stopVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
   import VersionHistoryPanel from './VersionHistoryPanel.svelte';
+  import { readOnly } from '$lib/stores/readOnly';
   import AccountButton from '$lib/components/AccountButton.svelte';
   import { authState } from '$lib/stores/auth';
   import { projectStore } from '$lib/services/projectStore';
@@ -385,9 +386,10 @@
     />
   {:else}
     <button
-      class="font-semibold text-white text-sm hover:bg-white/10 px-2 py-0.5 rounded transition-colors max-w-[12rem] truncate max-xl:max-w-[4rem]"
-      onclick={() => editingName = true}
-      title={$t('projectToolbar.rename')}
+      class="font-semibold text-white text-sm hover:bg-white/10 disabled:hover:bg-transparent disabled:cursor-default px-2 py-0.5 rounded transition-colors max-w-[12rem] truncate max-xl:max-w-[4rem]"
+      onclick={() => { if (!$readOnly) editingName = true; }}
+      disabled={$readOnly}
+      title={$readOnly ? '' : $t('projectToolbar.rename')}
     >{projectName}</button>
   {/if}
 
@@ -399,6 +401,7 @@
       class="w-32 rounded bg-slate-700 px-2 py-1 text-xs text-white" title={$t('floorControls.switch')}>
       {#each floors as fl}<option value={fl.id}>{fl.name}</option>{/each}
     </select>
+    {#if !$readOnly}
     <div class="relative" bind:this={floorMenuRef}>
       <button
         onclick={() => floorMenuOpen = !floorMenuOpen}
@@ -425,17 +428,20 @@
         </div>
       {/if}
     </div>
+    {/if}
     <span class="text-white/40 text-[10px] ml-1">{floors.length}F</span>
   </div>
 
   <div class="flex-1"></div>
 
+  {#if !$readOnly}
   <button onclick={undo} class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors" title={$t('projectToolbar.undoHint')} aria-label={$t('projectToolbar.undo')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
   </button>
   <button onclick={redo} class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors" title={$t('projectToolbar.redoHint')} aria-label={$t('projectToolbar.redo')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"/></svg>
   </button>
+  {/if}
 
   <div class="h-5 w-px bg-white/20 max-xl:hidden"></div>
 
@@ -528,6 +534,7 @@
   <!-- Zoom remains available on the canvas and in the compact toolbar menu. -->
 
   <!-- Version History button -->
+  {#if !$readOnly}
   <button
     onclick={() => versionHistoryOpen = true}
     class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors max-xl:hidden"
@@ -536,6 +543,7 @@
   >
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
   </button>
+  {/if}
 
   <!-- Area summary button -->
   <button
@@ -577,11 +585,13 @@
               {fl.name}{fl.id === activeFloorId ? ' ✓' : ''}
             </button>
           {/each}
+          {#if !$readOnly}
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('outer'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.outerHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('copy'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.allHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('empty'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.emptyHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-red-700 hover:bg-gray-100 text-left disabled:opacity-40" disabled={floors.length <= 1}
             onclick={() => { onRemoveFloor(activeFloorId); moreOpen = false; }}>{$t('floorControls.remove')}</button>
+          {/if}
           <div class="h-px bg-gray-100 my-1"></div>
         {/if}
         {#if mode === '2d'}
@@ -598,10 +608,10 @@
           <div class="h-px bg-gray-100 my-1"></div>
         {/if}
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={toggleElevationView}>{$elevationWallId ? '✓ ' : ''}{$t('toolbarView.elevationView')}</button>
-        {#if onToggleHistory}
+        {#if onToggleHistory && !$readOnly}
           <button class="md:hidden w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-expanded={historyOpen} aria-label={$t('editorPanels.history')} onclick={() => { onToggleHistory?.(moreButton); moreOpen = false; }}>{$t('undoHistory.title')}</button>
         {/if}
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { versionHistoryOpen = true; moreOpen = false; }}>{$t('versions.title')}</button>
+        {#if !$readOnly}<button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { versionHistoryOpen = true; moreOpen = false; }}>{$t('versions.title')}</button>{/if}
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { areaOpen = true; moreOpen = false; }}>{$t('areaSummary.title')}</button>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { settingsOpen = true; moreOpen = false; }}>{$t('settings.title')}</button>
         <a href={USER_GUIDE_URL} target="_blank" rel="noopener" class="block w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { moreOpen = false; }}>{$t('help.userGuide')}</a>
@@ -669,6 +679,7 @@
         <p class="px-3 pb-2 text-xs text-gray-500">{$t('exportMenu.interchangeHelp')}</p>
         <div class="h-px bg-gray-100 my-1"></div>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={onShareWithAssistant}>{$t('exportMenu.assistant')}</button>
+        {#if !$readOnly}
         <div class="h-px bg-gray-100 my-1"></div>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={onImportJSON}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -682,10 +693,12 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {$t('library.new')}
         </button>
+        {/if}
       </div>
     {/if}
   </div>
 
+  {#if !$readOnly}
   <!-- Reserve the widest translated status so autosave cannot move toolbar targets. -->
   <span class="inline-grid shrink-0 text-[11px] font-medium max-xl:hidden">
     {#each (['saveControls.saving', 'saveControls.saved', 'saveControls.unsaved'] as const) as key}
@@ -708,6 +721,7 @@
     {$t('saveControls.save')}
   </button>
   <AccountButton variant="toolbar" />
+  {/if}
 </div>
 
 {#if $saveError}

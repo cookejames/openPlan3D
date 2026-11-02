@@ -14,6 +14,7 @@ import { detailItem, itemDetails, validateItemDetails } from '$lib/utils/itemDet
 import { readProject } from '$lib/utils/projectValidation';
 import { mergeRoomPlanFloors, selectableContentIds, type AddedContent } from '$lib/utils/roomplanMerge';
 import { doorJoin } from '$lib/utils/scanAlignment';
+import { readOnly } from '$lib/stores/readOnly';
 
 
 function uid(): string {
@@ -37,7 +38,25 @@ export function createDefaultProject(name = 'Untitled Project'): Project {
   };
 }
 
-export const currentProject = writable<Project | null>(null);
+const projectInner = writable<Project | null>(null);
+let projectWriteDepth = 0;
+/** Runs a write that stays allowed in read-only mode (loading a project, switching floors). */
+function allowingWrites<T>(fn: () => T): T {
+  projectWriteDepth++;
+  try { return fn(); } finally { projectWriteDepth--; }
+}
+/** Edit functions mutate the project they read; while read-only they get a throwaway copy so the shared plan itself can never change. */
+function editableProject(): Project | null {
+  const p = get(projectInner);
+  return p && get(readOnly) ? structuredClone(p) : p;
+}
+const writesBlocked = () => projectWriteDepth === 0 && get(readOnly);
+/** The open project. While read-only (a shared plan), every edit write is refused here, the one place all edits pass through. */
+export const currentProject: Writable<Project | null> = {
+  subscribe: projectInner.subscribe,
+  set(value) { if (!writesBlocked()) projectInner.set(value); },
+  update(fn) { if (!writesBlocked()) projectInner.update(fn); },
+};
 
 export const activeFloor = derived(currentProject, ($p) => {
   if (!$p) return null;
@@ -45,7 +64,13 @@ export const activeFloor = derived(currentProject, ($p) => {
 });
 
 export type Tool = 'select' | 'wall' | 'door' | 'window' | 'furniture' | 'text' | 'measure' | 'annotate';
-export const selectedTool = writable<Tool>('select');
+const toolInner = writable<Tool>('select');
+/** Drawing tools are unavailable while read-only: the tool stays on 'select'. */
+export const selectedTool: Writable<Tool> = {
+  subscribe: toolInner.subscribe,
+  set(value) { toolInner.set(get(readOnly) ? 'select' : value); },
+  update(fn) { toolInner.update(v => { const next = fn(v); return get(readOnly) ? 'select' : next; }); },
+};
 
 /** Shared activation for the sidebar and keyboard measurement tools. */
 export function activateMeasurementTool(tool: 'measure' | 'annotate') {
@@ -131,7 +156,7 @@ let undoGroupDepth = 0;
 /** Begin an undo group. Nested calls are supported; only the outermost pair takes effect. */
 export function beginUndoGroup() {
   if (undoGroupDepth === 0) {
-    const p = get(currentProject);
+    const p = editableProject();
     undoGroupSnapshot = p ? JSON.stringify(p) : null;
     undoGroupUpdatedAt = p?.updatedAt;
     undoGroupSelection = captureSelection();
@@ -151,7 +176,7 @@ export function endUndoGroup(description?: string) {
     undoGroupSelection = undefined;
     _nextDescription = '';
     resetCoalescing();
-    const project = get(currentProject);
+    const project = editableProject();
     // Drag frames bump updatedAt; only changed content earns an entry and discards Redo.
     if (before === null || !project || JSON.stringify({ ...project, updatedAt }) === before) return;
     pushHistory(undoStack, { state: before, description: action, timestamp: Date.now(), selection });
@@ -164,7 +189,7 @@ export function endUndoGroup(description?: string) {
 function snapshot(description?: string, coalesceKey?: string, state?: string) {
   // If inside an undo group, skip — the group handles the snapshot
   if (undoGroupDepth > 0) return;
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const now = Date.now();
   // Coalesce rapid consecutive edits to the same field: the top-of-stack entry
@@ -231,7 +256,7 @@ function pruneFloorContext(project: Project) {
 /** Restore a history state with the selection recorded for it; entries without one keep the current selection, pruned. */
 function restoreHistoryProject(state: string, selection?: SelectionSnapshot) {
   const project = reviveDates(JSON.parse(state));
-  if (get(currentProject)?.activeFloorId !== project.activeFloorId) clearFloorContext();
+  if (editableProject()?.activeFloorId !== project.activeFloorId) clearFloorContext();
   currentProject.set(project);
   if (selection) {
     selectedElementId.set(selection.id);
@@ -244,7 +269,7 @@ export function undo() {
   resetCoalescing();
   const prev = undoStack.pop();
   if (!prev) return;
-  const cur = get(currentProject);
+  const cur = editableProject();
   if (cur) pushHistory(redoStack, { state: JSON.stringify(cur), description: prev.description, timestamp: prev.timestamp, selection: captureSelection() });
   restoreHistoryProject(prev.state, prev.selection);
   syncHistoryStore();
@@ -254,7 +279,7 @@ export function redo() {
   resetCoalescing();
   const next = redoStack.pop();
   if (!next) return;
-  const cur = get(currentProject);
+  const cur = editableProject();
   if (cur) pushHistory(undoStack, { state: JSON.stringify(cur), description: next.description, timestamp: next.timestamp, selection: captureSelection() });
   restoreHistoryProject(next.state, next.selection);
   syncHistoryStore();
@@ -265,7 +290,7 @@ export function jumpToUndoStep(targetIndex: number) {
   const total = undoStack.length; // total past states; current state is at index `total`
   if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex > total) return;
   if (targetIndex === total) return; // already at current state
-  const cur = get(currentProject);
+  const cur = editableProject();
   if (!cur) return;
   resetCoalescing();
 
@@ -285,7 +310,8 @@ export function jumpToUndoStep(targetIndex: number) {
 
 /** Apply `fn` to the active floor as one Undo step. An edit that changes nothing leaves history, Redo and updatedAt alone. */
 function mutate(fn: (floor: Floor) => void, description?: string, coalesceKey?: string) {
-  const p = get(currentProject);
+  if (get(readOnly)) return;
+  const p = editableProject();
   const floor = p?.floors.find((f) => f.id === p.activeFloorId);
   if (!p || !floor) return;
   const before = JSON.stringify(p);
@@ -376,7 +402,7 @@ export function beginDrag(description = 'Moved element') {
 /** Move furniture without creating an undo snapshot on every call (used during drag).
  *  Call `beginDrag()` when the drag starts to snapshot the pre-drag state. */
 export function moveFurniture(id: string, position: Point) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor) return;
@@ -390,7 +416,7 @@ export function moveFurniture(id: string, position: Point) {
 
 /** Apply one drag frame atomically. The canvas owns the enclosing undo group. */
 export function transformFurnitureDuringDrag(id: string, updates: Partial<Pick<FurnitureItem, 'position' | 'rotation' | 'scale'>>) {
-  const p = get(currentProject);
+  const p = editableProject();
   const floor = p?.floors.find(f => f.id === p.activeFloorId);
   const item = floor?.furniture.find(fi => fi.id === id);
   if (!p || !item) return;
@@ -410,7 +436,7 @@ export function commitFurnitureMove() {
 
 /** Rotate supported unlocked objects and walls around their collective bounds center. */
 export function rotateSelection(ids: ReadonlySet<string>, degrees = 15) {
-  const project = get(currentProject), floor = get(activeFloor);
+  const project = editableProject(), floor = get(activeFloor);
   if (!project || !floor) return;
   const updates = selectionRotation(floor,ids,degrees,project.customEntourage);
   if (!updates.size) return;
@@ -500,7 +526,7 @@ export function removeStair(id: string) {
 }
 
 export function moveStair(id: string, position: Point) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor || !floor.stairs) return;
@@ -551,7 +577,7 @@ export function removeColumn(id: string) {
 }
 
 export function moveColumn(id: string, position: Point) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor || !floor.columns) return;
@@ -584,7 +610,7 @@ export function addEntourageItem(defId: string, position: Point, width: number):
 
 /** Move an entourage item without snapshotting (used during drag). */
 export function moveEntourage(id: string, position: Point) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   const item = floor?.entourage?.find((e) => e.id === id);
@@ -597,7 +623,7 @@ export function moveEntourage(id: string, position: Point) {
 
 /** Resize an entourage item without snapshotting (used during handle drag). */
 export function resizeEntourage(id: string, width: number) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   const item = floor?.entourage?.find((e) => e.id === id);
@@ -617,7 +643,7 @@ export function updateEntourageItem(id: string, updates: Partial<EntourageItem>)
 
 /** Register an uploaded PNG as a reusable project-level entourage symbol. */
 export function addCustomEntourage(name: string, dataUrl: string, aspect: number): string {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return '';
   snapshot('Added custom entourage');
   if (!p.customEntourage) p.customEntourage = [];
@@ -682,7 +708,7 @@ export function removeElement(id: string) {
 /** Move a wall endpoint without creating an undo snapshot (for dragging) */
 export function moveWallEndpoint(id: string, endpoint: 'start' | 'end', position: Point) {
   if (!finitePoint(position)) return;
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor) return;
@@ -700,7 +726,7 @@ export function moveWallEndpoint(id: string, endpoint: 'start' | 'end', position
 export function moveWallGeometryDuringDrag(id: string, geometry: Pick<Wall, 'start' | 'end' | 'curvePoint'>) {
   if (!finitePoint(geometry.start) || !finitePoint(geometry.end) ||
     (geometry.curvePoint !== undefined && !finitePoint(geometry.curvePoint))) return;
-  const project = get(currentProject);
+  const project = editableProject();
   const wall = project?.floors.find(floor => floor.id === project.activeFloorId)?.walls.find(wall => wall.id === id);
   if (!project || !wall) return;
   if (samePoint(wall.start, geometry.start) && samePoint(wall.end, geometry.end)
@@ -842,7 +868,7 @@ export function updateFurniture(id: string, updates: Partial<FurnitureItem>) {
 
 /** Commit prepared metadata/photo edits only to the project that was read. */
 export function commitItemDetails(expected: Project, next: Project, description: string, coalesceKey?: string) {
-  if (get(currentProject) !== expected || next.id !== expected.id) throw new Error('The project changed while the photo was being prepared. Select the photo again.');
+  if (editableProject() !== expected || next.id !== expected.id) throw new Error('The project changed while the photo was being prepared. Select the photo again.');
   const valid = readProject(next);
   if (JSON.stringify(expected) === JSON.stringify(valid)) return;
   snapshot(description, coalesceKey);
@@ -851,7 +877,7 @@ export function commitItemDetails(expected: Project, next: Project, description:
 }
 
 export function updateItemDetails(target: DetailTarget, patch: ItemDetails) {
-  const project = get(currentProject);
+  const project = editableProject();
   if (!project || project.activeFloorId !== target.floorId) return;
   const next = readProject(project), floor = next.floors.find(f => f.id === target.floorId)!;
   if (target.kind === 'rooms' && !detailItem(next, target)) {
@@ -902,7 +928,7 @@ export function updateRoom(id: string, updates: Partial<{ name: string; floorTex
 export type FloorSeed = 'empty' | 'outer' | 'copy';
 
 export function addFloor(name?: string, seed: FloorSeed = 'outer') {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   snapshot('Added floor');
   // Levels drive the 3D stacking order, so derive from the highest existing
@@ -936,7 +962,7 @@ export function addFloor(name?: string, seed: FloorSeed = 'outer') {
 }
 
 export function removeFloor(id: string) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || p.floors.length <= 1 || !p.floors.some(f => f.id === id)) return;
   snapshot('Removed floor');
   if (p.activeFloorId === id) clearFloorContext();
@@ -949,18 +975,19 @@ export function removeFloor(id: string) {
 }
 
 export function setActiveFloor(floorId: string) {
-  const p = get(currentProject);
+  const p = get(projectInner);
   if (!p) return;
   if (p.activeFloorId !== floorId && p.floors.some((f) => f.id === floorId)) {
     clearFloorContext();
     p.activeFloorId = floorId;
-    currentProject.set({ ...p });
+    // Browsing floors is viewing, not editing, so it stays allowed while read-only.
+    allowingWrites(() => currentProject.set({ ...p }));
   }
 }
 
 /** An omitted elevation restores the legacy level-based default. */
 export function updateFloorElevation(floorId: string, elevation?: number) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || (elevation !== undefined && !validFloorElevation(elevation))) return;
   const entry = floorElevations(p.floors).find(entry => entry.floor.id === floorId);
   if (!entry || (elevation === undefined ? entry.floor.elevation === undefined : entry.elevation === elevation)) return;
@@ -973,7 +1000,7 @@ export function updateFloorElevation(floorId: string, elevation?: number) {
 
 /** Omission restores the legacy 5 cm slab. */
 export function updateFloorSlabThickness(floorId: string, thickness?: number) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || (thickness !== undefined && (typeof thickness !== 'number' || !Number.isFinite(thickness) || thickness <= 0))) return;
   const floor = p.floors.find(f => f.id === floorId);
   if (!floor || (thickness === undefined ? floor.slabThickness === undefined : (floor.slabThickness ?? 5) === thickness)) return;
@@ -986,7 +1013,7 @@ export function updateFloorSlabThickness(floorId: string, thickness?: number) {
 
 /** Every history entry restores the whole project, so a rename must be a step of its own. */
 export function updateProjectName(name: string) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || p.name === name) return;
   snapshot('Renamed project', 'project-name');
   p.name = name;
@@ -996,7 +1023,7 @@ export function updateProjectName(name: string) {
 
 /** The Settings dialog edits per keystroke; rapid edits share one step. */
 export function updateProjectDescription(description: string) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || (p.description ?? '') === description) return;
   snapshot('Changed project description', 'project-description');
   p.description = description;
@@ -1013,7 +1040,7 @@ export function loadProject(project: Project) {
   _nextDescription = '';
   resetCoalescing();
   clearFloorContext();
-  currentProject.set(project);
+  allowingWrites(() => currentProject.set(project));
   syncHistoryStore();
 }
 
@@ -1022,7 +1049,7 @@ export type RoomPlanMergeResult = { placed: number; added: AddedContent[] };
 
 /** Commit a pure merge as one history entry. Nothing changes while no project is open. */
 function applyRoomPlanMerge(floors: Floor[], description: string, gapCm?: number, interchange?: InterchangeState): RoomPlanMergeResult {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return { placed: 0, added: [] };
   const { project, placed, added } = mergeRoomPlanFloors(p, floors, gapCm, interchange);
   snapshot(description);
@@ -1033,7 +1060,7 @@ function applyRoomPlanMerge(floors: Floor[], description: string, gapCm?: number
 
 /** Add one floor's content beside the active floor's, whatever level it was scanned as. */
 export function importFloorIntoCurrentProject(floor: Floor, gapCm?: number): RoomPlanMergeResult {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return { placed: 0, added: [] };
   const entries = orderedFloors(p.floors);
   const active = entries.find(entry => entry.floor.id === p.activeFloorId) ?? entries[0];
@@ -1048,7 +1075,7 @@ export function addRoomPlanFloorsToProject(floors: Floor[], gapCm?: number, inte
 
 /** Show `floorId` with exactly `ids` selected and a clean editing context (select tool, nothing being placed). */
 export function selectImportedElements(floorId: string, ids: string[]) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p || !p.floors.some(f => f.id === floorId)) return;
   if (p.activeFloorId !== floorId) setActiveFloor(floorId); else clearFloorContext();
   selectedElementIds.set(new Set(ids.length > 1 ? ids : []));
@@ -1065,7 +1092,7 @@ export const doorJoinMode = writable<{ firstDoorId: string } | null>(null);
  * be joined.
  */
 export function joinScanDoors(movingDoorId: string, targetDoorId: string, gapCm?: number): boolean {
-  const p = get(currentProject);
+  const p = editableProject();
   const floor = p?.floors.find(f => f.id === p.activeFloorId);
   const joined = floor ? doorJoin(floor, movingDoorId, targetDoorId, gapCm) : null;
   if (!joined) return false;
@@ -1088,7 +1115,7 @@ export const placingWindowType = writable<import('$lib/models/types').Window['ty
 
 /** Duplicate a door onto the same wall */
 export function duplicateDoor(id: string): string | null {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return null;
   const floor = p.floors.find(f => f.id === p.activeFloorId);
   if (!floor) return null;
@@ -1106,7 +1133,7 @@ export function duplicateDoor(id: string): string | null {
 
 /** Duplicate a window onto the same wall */
 export function duplicateWindow(id: string): string | null {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return null;
   const floor = p.floors.find(f => f.id === p.activeFloorId);
   if (!floor) return null;
@@ -1144,7 +1171,7 @@ export function pasteSelection(source: Floor, ids: ReadonlySet<string>, step = 1
 
 /** Duplicate furniture */
 export function duplicateFurniture(id: string): string | null {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return null;
   const floor = p.floors.find(f => f.id === p.activeFloorId);
   if (!floor) return null;
@@ -1160,7 +1187,7 @@ export function duplicateFurniture(id: string): string | null {
 /** Move a wall parallel to itself (both endpoints shift by the same perpendicular offset) without undo snapshot (for dragging) */
 export function moveWallParallel(id: string, dx: number, dy: number) {
   if (dx === 0 && dy === 0) return;
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor) return;
@@ -1178,7 +1205,7 @@ export function moveWallParallel(id: string, dx: number, dy: number) {
 
 /** An opening belongs to one wall, so a split cannot cross its interior. */
 export function wallSplitIntersectsOpening(id: string, t: number): boolean {
-  const p = get(currentProject);
+  const p = editableProject();
   const floor = p?.floors.find(f => f.id === p.activeFloorId);
   const wall = floor?.walls.find(w => w.id === id);
   if (!floor || !wall || !Number.isFinite(t) || t <= 0 || t >= 1) return false;
@@ -1196,7 +1223,7 @@ export function wallSplitIntersectsOpening(id: string, t: number): boolean {
 
 /** Split a wall into two segments at a given parameter t (0-1) */
 export function splitWall(id: string, t: number): string | null {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return null;
   const floor = p.floors.find((f) => f.id === p.activeFloorId);
   if (!floor) return null;
@@ -1272,7 +1299,7 @@ export function splitWall(id: string, t: number): string | null {
 
 /** Duplicate a wall */
 export function duplicateWall(id: string): string | null {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return null;
   const floor = p.floors.find(f => f.id === p.activeFloorId);
   if (!floor) return null;
@@ -1378,7 +1405,7 @@ export function updateTextAnnotation(id: string, updates: Partial<{ x: number; y
 }
 
 export function moveTextAnnotation(id: string, position: { x: number; y: number }) {
-  const p = get(currentProject);
+  const p = editableProject();
   if (!p) return;
   const floor = p.floors.find(f => f.id === p.activeFloorId);
   if (!floor?.textAnnotations) return;

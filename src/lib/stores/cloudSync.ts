@@ -2,6 +2,7 @@ import { derived, get, writable } from 'svelte/store';
 import { currentProject, loadProject } from './project';
 import { saveState, markClean, autoSave } from './saveStatus';
 import { authState } from './auth';
+import { readOnly } from './readOnly';
 import { projectStore } from '$lib/services/projectStore';
 import { storageErrorMessage } from '$lib/services/datastore';
 
@@ -67,6 +68,7 @@ export function keepMineAsCopy(): Promise<boolean> {
 
 /** Watch the open project for remote changes; resubscribes when the project id or auth changes. */
 export function startCloudWatch(): () => void {
+  if (get(readOnly)) return () => {};
   let unwatch: (() => void) | null = null;
   const target = derived([currentProject, authState], ([p, a]) => `${a.status === 'signedIn' ? a.user.uid : ''}|${p?.id ?? ''}`);
   let lastId = '';
