@@ -2,16 +2,23 @@
   import { t } from '$lib/i18n';
   import { tick } from 'svelte';
 
-  let { name, disabled = false, onaction }: {
+  type MenuAction = 'open' | 'rename' | 'duplicate' | 'upload' | 'delete';
+  let { name, disabled = false, uploadable = false, uploadBusy = false, onaction }: {
     name: string;
     disabled?: boolean;
-    onaction: (action: 'open' | 'rename' | 'duplicate' | 'delete') => void;
+    /** Adds Upload to cloud for local-only projects while signed in. */
+    uploadable?: boolean;
+    /** An upload is running somewhere in the library: the upload item shows as busy and cannot be chosen. */
+    uploadBusy?: boolean;
+    onaction: (action: MenuAction) => void;
   } = $props();
   const id = $props.id();
   let open = $state(false);
   let trigger = $state<HTMLButtonElement>();
   let menu = $state<HTMLDivElement>();
-  const actions = ['open', 'rename', 'duplicate', 'delete'] as const;
+  const actions = $derived((uploadable
+    ? ['open', 'rename', 'duplicate', 'upload', 'delete']
+    : ['open', 'rename', 'duplicate', 'delete']) as MenuAction[]);
 
   function close(restore = false) {
     open = false;
@@ -71,9 +78,10 @@
     onkeydown={keydown} class="absolute top-12 right-3 bg-white rounded-lg shadow-xl border border-gray-200 py-1 w-40 z-50">
     {#each actions as action}
       <button type="button" role="menuitem" tabindex="-1"
+        disabled={action === 'upload' && uploadBusy}
         onclick={() => { close(true); onaction(action); }}
-        class="w-full px-3 py-2 text-sm text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500 {action === 'delete' ? 'text-red-500 hover:bg-red-50 focus:bg-red-50' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}">
-        {$t(`library.${action}`)}
+        class="w-full px-3 py-2 text-sm text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-40 {action === 'delete' ? 'text-red-500 hover:bg-red-50 focus:bg-red-50' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}">
+        {action === 'upload' ? $t(uploadBusy ? 'library.sync.uploading' : 'library.sync.upload') : $t(`library.${action}`)}
       </button>
     {/each}
   </div>

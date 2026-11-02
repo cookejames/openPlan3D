@@ -8,6 +8,7 @@
   import { base } from '$app/paths';
   import { storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
   import { projectStore } from '$lib/services/projectStore';
+  import { authState } from '$lib/stores/auth';
   import { openProject } from '$lib/services/projectOpening';
   import { createDefaultProject } from '$lib/stores/project';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
@@ -16,6 +17,7 @@
   import LibraryStorageNote from '$lib/components/LibraryStorageNote.svelte';
   import AccountButton from '$lib/components/AccountButton.svelte';
   import ProjectActionsMenu from '$lib/components/ProjectActionsMenu.svelte';
+  import SyncBadge from '$lib/components/SyncBadge.svelte';
   import { houseTemplates } from '$lib/utils/houseTemplates';
 
   const openingLifetime = new AbortController();
@@ -41,6 +43,17 @@
 
   let libraryError = $state<string | null>(null);
 
+  // Cloud sync: badges, uploads and the one-time upload prompt. Only shown while signed in.
+  const syncStatus = projectStore.syncStatus;
+  const signedIn = $derived($authState.status === 'signedIn');
+  const localProjects = $derived(signedIn ? projects.filter(project => $syncStatus[project.id] === 'local') : []);
+  let syncUid = $state<string | null>(null);
+  let promptDismissed = $state(false);
+  let uploadingId = $state<string | null>(null);
+  let uploadBusy = $state(false);
+  let uploadRun = $state<{ done: number; total: number; failed: number } | null>(null);
+  let syncError = $state<string | null>(null);
+
   async function withLibraryError(action: () => Promise<void>) {
     try { await action(); libraryError = null; }
     catch (error) { libraryError = storageErrorMessage(error); }
@@ -51,13 +64,58 @@
     catch (error) { libraryError = storageErrorMessage(error); }
   }
 
+  let refreshSeq = 0;
   async function refreshProjects() {
+    const seq = ++refreshSeq;
     loading = true;
     try {
-      projects = await projectStore.list();
-      projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      thumbnails = await projectStore.getThumbnails();
-    } finally { loading = false; }
+      const rows = await projectStore.list();
+      // A newer refresh (for example the one after sign-in) supersedes this one, so an older list cannot overwrite it.
+      if (seq !== refreshSeq) return;
+      rows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      projects = rows;
+      const nextThumbnails = await projectStore.getThumbnails();
+      if (seq !== refreshSeq) return;
+      thumbnails = nextThumbnails;
+    } finally { if (seq === refreshSeq) loading = false; }
+  }
+
+  function promptStorageKey(uid: string) { return `o3d_cloud_upload_prompt_dismissed:${uid}`; }
+  function readPromptDismissed(uid: string): boolean {
+    try { return localStorage.getItem(promptStorageKey(uid)) === '1'; } catch { return false; }
+  }
+  function persistPromptDismissal() {
+    promptDismissed = true;
+    if (!syncUid) return;
+    try { localStorage.setItem(promptStorageKey(syncUid), '1'); } catch { /* the prompt may show again in this browser */ }
+  }
+  function dismissPrompt() { persistPromptDismissal(); uploadRun = null; }
+
+  /** Sends local projects one at a time; a failure is counted and the run goes on. */
+  async function uploadAll() {
+    if (uploadBusy) return;
+    const ids = localProjects.map(project => project.id);
+    if (ids.length === 0) return;
+    persistPromptDismissal();
+    uploadBusy = true; syncError = null;
+    let failed = 0;
+    uploadRun = { done: 0, total: ids.length, failed };
+    for (const [index, id] of ids.entries()) {
+      uploadingId = id;
+      try { await projectStore.uploadToCloud(id); }
+      catch { failed += 1; }
+      uploadRun = { done: index + 1, total: ids.length, failed };
+    }
+    uploadingId = null; uploadBusy = false;
+    uploadRun = failed === 0 ? null : { done: ids.length, total: ids.length, failed };
+  }
+
+  async function uploadOne(project: { id: string; name: string }) {
+    if (uploadBusy) return;
+    uploadBusy = true; uploadingId = project.id; syncError = null;
+    try { await projectStore.uploadToCloud(project.id); }
+    catch { syncError = $t('library.sync.uploadFailed', { name: project.name || $t('library.untitled') }); }
+    finally { uploadingId = null; uploadBusy = false; }
   }
 
   /** `file` is a library backup the welcome's Import a Plan was given. */
@@ -69,6 +127,17 @@
   }
 
   onMount(() => {
+    // The first auth value is covered by the load below; a later change of user (sign-in or sign-out) reloads the list.
+    let listedUid: string | null | undefined;
+    const unsubscribeAuth = authState.subscribe((auth) => {
+      const uid = auth.status === 'signedIn' ? auth.user.uid : null;
+      if (uid === listedUid) return;
+      const first = listedUid === undefined;
+      listedUid = uid;
+      syncUid = uid;
+      promptDismissed = uid !== null && readPromptDismissed(uid);
+      if (!first) void withLibraryError(refreshProjects);
+    });
     void withLibraryError(async () => {
       await refreshProjects();
       const seen = localStorage.getItem('hasSeenWelcome');
@@ -76,6 +145,7 @@
         showWelcome = true;
       }
     });
+    return unsubscribeAuth;
   });
 
   async function createProject(create: () => unknown) {
@@ -222,6 +292,29 @@
         </div>
       </div>
     {/if}
+    {#if signedIn && (uploadRun || (!promptDismissed && localProjects.length > 0))}
+      <div class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        {#if uploadRun}
+          {#if uploadRun.done < uploadRun.total}
+            <p role="status">{$t('library.sync.progress', { done: uploadRun.done, total: uploadRun.total })}</p>
+          {:else}
+            <p role="alert">{$t('library.sync.someFailed', { failed: uploadRun.failed, total: uploadRun.total })}</p>
+            <button class="font-semibold underline" onclick={dismissPrompt}>{$t('library.sync.dismiss')}</button>
+          {/if}
+        {:else}
+          <p>{$t(localProjects.length === 1 ? 'library.sync.promptOne' : 'library.sync.promptMany', { count: localProjects.length })}</p>
+          <div class="flex flex-wrap gap-4">
+            <button class="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700" onclick={uploadAll}>{$t('library.sync.uploadAll')}</button>
+            <button class="font-semibold underline" onclick={dismissPrompt}>{$t('library.sync.notNow')}</button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+    {#if syncError}
+      <div role="alert" class="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <p>{syncError}</p>
+      </div>
+    {/if}
     {#if loading && projects.length === 0}
       <p role="status" class="py-12 text-center text-gray-500">{$t('library.loadingSaved')}</p>
     {:else if projects.length === 0 && !libraryError}
@@ -243,6 +336,7 @@
     {:else}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {#each projects as project (project.id)}
+          {@const status = signedIn ? (uploadingId === project.id ? 'uploading' : $syncStatus[project.id]) : undefined}
           <div class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-gray-300 transition-all duration-200 relative {project.id === duplicatedId ? 'ring-2 ring-blue-400' : ''}">
             <!-- Thumbnail -->
             <a href={`${base}/editor?id=${encodeURIComponent(project.id)}`} aria-label={$t('library.openName', { name: project.name || $t('library.untitled') })} class="block">
@@ -265,10 +359,16 @@
               <p class="text-xs text-gray-400 mt-1">{formatDate(project.updatedAt, $locale)}</p>
             </div>
 
+            {#if status}
+              <div class="absolute top-3 left-3 z-10 pointer-events-none"><SyncBadge {status} /></div>
+            {/if}
+
             <ProjectActionsMenu name={project.name} disabled={duplicating}
+              uploadable={signedIn && $syncStatus[project.id] === 'local'} uploadBusy={uploadBusy}
               onaction={(action) => {
                 if (action === 'open') goto(`${base}/editor?id=${encodeURIComponent(project.id)}`);
                 else if (action === 'duplicate') void duplicateProject(project.id);
+                else if (action === 'upload') void uploadOne(project);
                 else openAction(action, project);
               }} />
           </div>
