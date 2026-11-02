@@ -20,7 +20,7 @@
 		"test": "vitest run",
 		"test:browser": "playwright test",
 		"test:watch": "vitest",
-		"test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"vitest run tests/rules\"",
+		"test:emulator": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"vitest run --config vitest.emulator.config.ts\"",
 		"benchmark:viewer": "playwright test --config=playwright.benchmark.config.ts",
 		"benchmark:fixtures": "node tooling/render-fixtures.mjs",
 		"catalog:manifest": "node tooling/catalog-manifest.mjs",

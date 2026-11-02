@@ -14,8 +14,8 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['tests/fixtures/indexeddb.ts'],
     include: ['tests/**/*.test.ts'],
-    // Rules tests need the Firebase emulators; run them via `npm run test:rules`.
-    exclude: [...configDefaults.exclude, 'tests/rules/**'],
+    // Rules tests need the Firebase emulators; run them via `npm run test:emulator`.
+    exclude: [...configDefaults.exclude, 'tests/emulator/**'],
     restoreMocks: true,
     unstubGlobals: true,
   },
