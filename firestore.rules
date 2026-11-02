@@ -1,6 +1,7 @@
 rules_version = '2';
 // Firestore: projects are read and written by verified-email editors listed in `editorEmails`.
-// Project creation is gated by `config/access.allowedEmails`, which only the console can change.
+// Project creation is gated by `config/access`: an exact address in `allowedEmails`, or any address
+// whose domain (after the @, exact match, no subdomains) is in `allowedDomains`. Only the console can change it.
 // Share tokens (`shares/{token}`) are created and deleted by project editors.
 service cloud.firestore {
   match /databases/{db}/documents {
@@ -9,7 +10,9 @@ service cloud.firestore {
     }
     function me() { return request.auth.token.email.lower(); }
     function allowlisted() {
-      return me() in get(/databases/$(db)/documents/config/access).data.allowedEmails;
+      let access = get(/databases/$(db)/documents/config/access).data;
+      return me() in access.get('allowedEmails', [])
+        || me().split('@')[1] in access.get('allowedDomains', []);
     }
     function isEditor(data) { return signedIn() && me() in data.editorEmails; }
 

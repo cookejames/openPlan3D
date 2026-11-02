@@ -79,6 +79,38 @@ describe('project create', () => {
   });
 });
 
+describe('project create by allowed domain', () => {
+  const dan = (email = 'dan@family.org', verified = true) => ctxOf('dan', email, verified).firestore();
+  const asDan = (email = 'dan@family.org') => project({ ownerUid: 'dan', editorEmails: [email.toLowerCase()] });
+  beforeEach(async () => {
+    await seed('config/access', { allowedEmails: ['alice@x.com'], allowedDomains: ['family.org'] });
+  });
+  it('allows any verified address at an allowed domain', async () => {
+    await assertSucceeds(setDoc(doc(dan(), 'projects/p1'), asDan()));
+  });
+  it('matches the domain case-insensitively', async () => {
+    await assertSucceeds(setDoc(doc(dan('Dan@Family.ORG'), 'projects/p1'), asDan('Dan@Family.ORG')));
+  });
+  it('still allows listed addresses', async () => {
+    await assertSucceeds(setDoc(doc(alice(), 'projects/p1'), project({ editorEmails: ['alice@x.com'] })));
+  });
+  it('denies other domains', async () => {
+    await assertFails(setDoc(doc(dan('dan@other.org'), 'projects/p1'), asDan('dan@other.org')));
+  });
+  it('denies subdomains and lookalike domains', async () => {
+    await assertFails(setDoc(doc(dan('dan@mail.family.org'), 'projects/p1'), asDan('dan@mail.family.org')));
+    await assertFails(setDoc(doc(dan('dan@notfamily.org'), 'projects/p1'), asDan('dan@notfamily.org')));
+  });
+  it('denies an unverified address at an allowed domain', async () => {
+    await assertFails(setDoc(doc(dan('dan@family.org', false), 'projects/p1'), asDan()));
+  });
+  it('works when only allowedDomains is set', async () => {
+    await seed('config/access', { allowedDomains: ['family.org'] });
+    await assertSucceeds(setDoc(doc(dan(), 'projects/p1'), asDan()));
+    await assertFails(setDoc(doc(alice(), 'projects/p2'), project({ editorEmails: ['alice@x.com'] })));
+  });
+});
+
 describe('project read', () => {
   beforeEach(async () => { await seed('projects/p1', project({ editorEmails: ['alice@x.com'] })); });
   it('allows an editor', async () => { await assertSucceeds(getDoc(doc(alice(), 'projects/p1'))); });
