@@ -48,6 +48,18 @@ const PUSH_DELAY = 5_000;
 const RETRY_DELAYS = [5_000, 15_000, 60_000, 300_000];
 const KEEP_REVS = 10;
 const CLOUD_TIMEOUT = 8_000;
+const THUMB_MAX_BYTES = 200 * 1024;
+
+/** Decodes a base64 JPEG data URL without fetch. Null when it is not base64 or is over the size limit. */
+function jpegBlobFromDataUrl(dataUrl: string): Blob | null {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0 || !/;base64$/i.test(dataUrl.slice(0, comma))) return null;
+  const binary = atob(dataUrl.slice(comma + 1));
+  if (binary.length > THUMB_MAX_BYTES) return null;
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: 'image/jpeg' });
+}
 
 export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const { local, cloud } = deps;
@@ -100,6 +112,28 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const redirty = new Set<string>();
   const failures = new Map<string, number>();
   const conflicted = new Set<string>();
+
+  // Thumbnails are optional: they never touch sync status and never retry.
+  const thumbTimers = new Map<string, unknown>();
+  const pendingThumbs = new Map<string, string>();
+  const unscheduleThumb = (id: string) => {
+    if (!thumbTimers.has(id)) return;
+    clearTimer(thumbTimers.get(id));
+    thumbTimers.delete(id);
+    pendingThumbs.delete(id);
+  };
+
+  async function uploadThumb(id: string): Promise<void> {
+    const dataUrl = pendingThumbs.get(id);
+    pendingThumbs.delete(id);
+    if (dataUrl === undefined || !cloud) return;
+    try {
+      const blob = jpegBlobFromDataUrl(dataUrl);
+      if (blob) await cloud.uploadThumbnail(id, blob);
+    } catch {
+      // Optional: a failed thumbnail upload is not a sync failure.
+    }
+  }
 
   const unschedule = (id: string) => {
     if (!timers.has(id)) return;
@@ -278,6 +312,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       if ((await readLocal(id)) !== null) await local.delete(id);
       if (tracked) await deps.meta.remove(id);
       unschedule(id);
+      unscheduleThumb(id);
       conflicted.delete(id);
       failures.delete(id);
       // A non-owner only removes their local copy; the project is still shared with them, so the next
@@ -286,6 +321,18 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     },
 
     loadLatest,
+
+    async saveThumbnail(id, dataUrl) {
+      await local.saveThumbnail(id, dataUrl);
+      if (!cloud || !deps.user()) return;
+      try {
+        const meta = await deps.meta.read(id);
+        if (!meta || meta.knownRev === null) return;
+      } catch { return; }
+      pendingThumbs.set(id, dataUrl);
+      if (thumbTimers.has(id)) clearTimer(thumbTimers.get(id));
+      thumbTimers.set(id, setTimer(() => { thumbTimers.delete(id); void uploadThumb(id); }, PUSH_DELAY));
+    },
 
     async keepMineAsCopy(id) {
       const mine = await local.load(id);
@@ -321,6 +368,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
 
     dispose() {
       for (const id of [...timers.keys()]) unschedule(id);
+      for (const id of [...thumbTimers.keys()]) unscheduleThumb(id);
       if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
     },
