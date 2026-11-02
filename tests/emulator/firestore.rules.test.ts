@@ -177,3 +177,52 @@ describe('shares', () => {
     await assertFails(deleteDoc(doc(bob(), `shares/${token}`)));
   });
 });
+
+describe('presence', () => {
+  const pres = (uid: string, email: string, over: Record<string, unknown> = {}) =>
+    ({ uid, email, mode: 'editing', claimedAt: null, lastSeen: new Date(), ...over });
+  beforeEach(async () => { await seed('projects/p1', project()); });
+
+  it('lets an editor write their own and read others', async () => {
+    await assertSucceeds(setDoc(doc(alice(), 'projects/p1/presence/s1'), pres('alice', 'alice@x.com')));
+    await assertSucceeds(setDoc(doc(bob(), 'projects/p1/presence/s2'), pres('bob', 'bob@x.com', { mode: 'viewing' })));
+    await assertSucceeds(getDoc(doc(bob(), 'projects/p1/presence/s1')));
+    await assertSucceeds(getDocs(collection(bob(), 'projects/p1/presence')));
+    await assertSucceeds(updateDoc(doc(alice(), 'projects/p1/presence/s1'), { mode: 'viewing' }));
+  });
+  it('denies a non-editor read and write', async () => {
+    await seed('projects/p1/presence/s1', pres('alice', 'alice@x.com'));
+    await assertFails(getDocs(collection(carol(), 'projects/p1/presence')));
+    await assertFails(getDoc(doc(carol(), 'projects/p1/presence/s1')));
+    await assertFails(setDoc(doc(carol(), 'projects/p1/presence/s3'), pres('carol', 'carol@x.com')));
+  });
+  it('denies unauthenticated access', async () => {
+    const anon = env.unauthenticatedContext().firestore();
+    await seed('projects/p1/presence/s1', pres('alice', 'alice@x.com'));
+    await assertFails(getDocs(collection(anon, 'projects/p1/presence')));
+    await assertFails(setDoc(doc(anon, 'projects/p1/presence/s9'), pres('alice', 'alice@x.com')));
+    await assertFails(deleteDoc(doc(anon, 'projects/p1/presence/s1')));
+  });
+  it('denies another uid or email', async () => {
+    await assertFails(setDoc(doc(bob(), 'projects/p1/presence/s1'), pres('alice', 'bob@x.com')));
+    await assertFails(setDoc(doc(bob(), 'projects/p1/presence/s1'), pres('bob', 'alice@x.com')));
+  });
+  it('denies updating another user\'s session doc', async () => {
+    await seed('projects/p1/presence/s1', pres('alice', 'alice@x.com'));
+    await assertFails(setDoc(doc(bob(), 'projects/p1/presence/s1'), pres('bob', 'bob@x.com')));
+  });
+  it('denies extra fields and bad modes', async () => {
+    await assertFails(setDoc(doc(alice(), 'projects/p1/presence/s1'), pres('alice', 'alice@x.com', { extra: 1 })));
+    await assertFails(setDoc(doc(alice(), 'projects/p1/presence/s1'), pres('alice', 'alice@x.com', { mode: 'admin' })));
+  });
+  it('lets the owner delete others\' presence but not a non-owner editor', async () => {
+    await seed('projects/p1/presence/s2', pres('bob', 'bob@x.com'));
+    await assertFails(deleteDoc(doc(carol(), 'projects/p1/presence/s2')));
+    await seed('projects/p1/presence/s1', pres('alice', 'alice@x.com'));
+    await assertFails(deleteDoc(doc(bob(), 'projects/p1/presence/s1')));
+    await assertSucceeds(deleteDoc(doc(bob(), 'projects/p1/presence/s2')));
+    await assertSucceeds(deleteDoc(doc(alice(), 'projects/p1/presence/s1')));
+    await seed('projects/p1/presence/s3', pres('bob', 'bob@x.com'));
+    await assertSucceeds(deleteDoc(doc(alice(), 'projects/p1/presence/s3')));
+  });
+});

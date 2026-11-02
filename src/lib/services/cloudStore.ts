@@ -101,6 +101,17 @@ function toMeta(id: string, data: DocumentData): CloudProjectMeta {
   };
 }
 
+export interface PresenceEntry {
+  sessionId: string;
+  uid: string;
+  email: string;
+  mode: 'editing' | 'viewing';
+  claimedAt: Date | null;
+  lastSeen: Date | null;
+}
+
+const toDate = (v: unknown): Date | null => (v instanceof Timestamp ? v.toDate() : null);
+
 export function createCloudStore(deps: CloudStoreDeps) {
   const { db, storage } = deps;
   const projectDoc = (id: string) => doc(db, 'projects', id);
@@ -278,7 +289,45 @@ export function createCloudStore(deps: CloudStoreDeps) {
         for (const prefix of prefixes) await walk(prefix);
       };
       await walk(ref(storage, `projects/${id}`));
+      // Presence rules read the project doc, so these must go first.
+      const presence = await getDocs(collection(db, 'projects', id, 'presence'));
+      await Promise.all(presence.docs.map((d) => deleteDoc(d.ref)));
       await deleteDoc(projectDoc(id));
+    },
+
+    async writePresence(pid: string, sessionId: string, opts: { mode: 'editing' | 'viewing'; claim: boolean }): Promise<void> {
+      const user = me();
+      const data: Record<string, unknown> = {
+        uid: user.uid,
+        email: user.email.toLowerCase(),
+        mode: opts.mode,
+        lastSeen: serverTimestamp(),
+      };
+      if (opts.claim) data.claimedAt = serverTimestamp();
+      if (opts.mode === 'viewing') data.claimedAt = null;
+      await setDoc(doc(db, 'projects', pid, 'presence', sessionId), data, { merge: true });
+    },
+
+    async removePresence(pid: string, sessionId: string): Promise<void> {
+      try { await deleteDoc(doc(db, 'projects', pid, 'presence', sessionId)); } catch { /* best effort */ }
+    },
+
+    watchPresence(pid: string, cb: (entries: PresenceEntry[]) => void): () => void {
+      return onSnapshot(
+        collection(db, 'projects', pid, 'presence'),
+        (snap) => cb(snap.docs.map((d) => {
+          const data = d.data({ serverTimestamps: 'estimate' });
+          return {
+            sessionId: d.id,
+            uid: data.uid,
+            email: data.email,
+            mode: data.mode === 'editing' ? 'editing' : 'viewing',
+            claimedAt: toDate(data.claimedAt),
+            lastSeen: toDate(data.lastSeen),
+          } as PresenceEntry;
+        })),
+        (error) => { console.warn('Presence watch failed', error); cb([]); },
+      );
     },
 
     async uploadThumbnail(id: string, jpeg: Blob): Promise<void> {

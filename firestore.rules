@@ -34,6 +34,23 @@ service cloud.firestore {
       allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
     }
 
+    // Soft edit-lock presence: one doc per browser tab session, visible only to project editors.
+    match /projects/{pid}/presence/{sid} {
+      function parentOf(pid) { return get(/databases/$(db)/documents/projects/$(pid)).data; }
+      function validPresence() {
+        return request.resource.data.uid == request.auth.uid
+          && request.resource.data.email == me()
+          && request.resource.data.mode in ['editing', 'viewing']
+          && request.resource.data.keys().hasOnly(['uid', 'email', 'mode', 'claimedAt', 'lastSeen']);
+      }
+      allow read: if isEditor(parentOf(pid));
+      allow create: if isEditor(parentOf(pid)) && validPresence();
+      allow update: if isEditor(parentOf(pid)) && validPresence()
+        && resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && (resource.data.uid == request.auth.uid
+        || parentOf(pid).ownerUid == request.auth.uid);
+    }
+
     match /shares/{token} {
       function projectOf(pid) { return get(/databases/$(db)/documents/projects/$(pid)).data; }
       allow get: if signedIn();

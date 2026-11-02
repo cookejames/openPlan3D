@@ -350,6 +350,76 @@ async function revObjects(id: string): Promise<string[]> {
 }
 const objectExists = (c: Client, path: string) => getBytes(ref(c.storage, path)).then(() => true, () => false);
 
+describe('presence (emulator)', () => {
+  const latest = (c: Client, pid: string) => {
+    const box: { entries: import('$lib/services/cloudStore').PresenceEntry[] } = { entries: [] };
+    const stop = c.store.watchPresence(pid, (e) => { box.entries = e; });
+    return { box, stop };
+  };
+  const find = (box: { entries: { sessionId: string }[] }, sid: string) => box.entries.find((e) => e.sessionId === sid) as import('$lib/services/cloudStore').PresenceEntry | undefined;
+
+  async function shared(pid: string) {
+    await alice.store.createProject(makeProject(pid));
+    await alice.store.setEditors(pid, ['alice@example.com', 'bob@example.com']);
+  }
+
+  it('round-trips presence between two users', async () => {
+    await shared('pr1');
+    const w = latest(bob, 'pr1');
+    await alice.store.writePresence('pr1', 'sa', { mode: 'editing', claim: true });
+    await bob.store.writePresence('pr1', 'sb', { mode: 'viewing', claim: false });
+    await vi_waitFor(() => !!find(w.box, 'sa')?.claimedAt && !!find(w.box, 'sb'));
+    const a = find(w.box, 'sa')!;
+    expect(a).toMatchObject({ uid: alice.uid, email: 'alice@example.com', mode: 'editing' });
+    expect(a.lastSeen).toBeInstanceOf(Date);
+    expect(find(w.box, 'sb')).toMatchObject({ mode: 'viewing', claimedAt: null });
+    const claimed = a.claimedAt!.getTime();
+    // heartbeat keeps claimedAt
+    await alice.store.writePresence('pr1', 'sa', { mode: 'editing', claim: false });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(find(w.box, 'sa')!.claimedAt!.getTime()).toBe(claimed);
+    // viewing clears it
+    await alice.store.writePresence('pr1', 'sa', { mode: 'viewing', claim: false });
+    await vi_waitFor(() => find(w.box, 'sa')?.mode === 'viewing');
+    expect(find(w.box, 'sa')!.claimedAt).toBeNull();
+    w.stop();
+  });
+
+  it('removePresence deletes and swallows errors', async () => {
+    await shared('pr2');
+    const w = latest(alice, 'pr2');
+    await alice.store.writePresence('pr2', 'sa', { mode: 'editing', claim: true });
+    await vi_waitFor(() => !!find(w.box, 'sa'));
+    await alice.store.removePresence('pr2', 'sa');
+    await vi_waitFor(() => !find(w.box, 'sa'));
+    await expect(eve.store.removePresence('pr2', 'sa')).resolves.toBeUndefined();
+    w.stop();
+  });
+
+  it('watchPresence reports [] and does not throw when denied', async () => {
+    await shared('pr3');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let got: unknown = null;
+    const stop = eve.store.watchPresence('pr3', (e) => { got = e; });
+    await vi_waitFor(() => Array.isArray(got));
+    expect(got).toEqual([]);
+    stop();
+    warn.mockRestore();
+  });
+
+  it('deleteProject removes presence docs', async () => {
+    await shared('pr4');
+    await alice.store.writePresence('pr4', 'sa', { mode: 'editing', claim: true });
+    await bob.store.writePresence('pr4', 'sb', { mode: 'viewing', claim: false });
+    await alice.store.deleteProject('pr4');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const { getDocs, collection } = await import('firebase/firestore');
+      expect((await getDocs(collection(ctx.firestore(), 'projects', 'pr4', 'presence'))).size).toBe(0);
+    });
+    await expectDocAbsent('pr4');
+  });
+});
+
 // Rules deny reads of missing documents (resource is null), so absence is checked with rules disabled.
 async function expectDocAbsent(id: string) {
   await env.withSecurityRulesDisabled(async (ctx) => {
