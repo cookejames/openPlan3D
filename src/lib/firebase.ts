@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/public';
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { browserLocalPersistence, connectAuthEmulator, GoogleAuthProvider, initializeAuth, signInWithCredential, type Auth } from 'firebase/auth';
+import { browserLocalPersistence, browserPopupRedirectResolver, connectAuthEmulator, GoogleAuthProvider, initializeAuth, signInWithCredential, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, initializeFirestore, memoryLocalCache, persistentLocalCache, type Firestore } from 'firebase/firestore';
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
@@ -30,7 +30,8 @@ export const app: FirebaseApp | null =
 export const useEmulators = env.PUBLIC_FIREBASE_USE_EMULATORS === 'true';
 
 export const auth: Auth | null = app
-  ? initializeAuth(app, { persistence: browserLocalPersistence })
+  // initializeAuth, unlike getAuth, omits the popup resolver; signInWithPopup fails without it.
+  ? initializeAuth(app, { persistence: browserLocalPersistence, popupRedirectResolver: browserPopupRedirectResolver })
   : null;
 
 export const db: Firestore | null = app

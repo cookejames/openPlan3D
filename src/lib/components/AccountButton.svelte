@@ -33,7 +33,8 @@
     busy = true;
     try {
       await signIn();
-    } catch {
+    } catch (e) {
+      console.error('Sign-in failed', e);
       showError($t('account.signInError'));
     } finally {
       busy = false;
@@ -46,7 +47,8 @@
     try {
       await signOut();
       menuOpen = false;
-    } catch {
+    } catch (e) {
+      console.error('Sign-out failed', e);
       showError($t('account.signOutError'));
     } finally {
       busy = false;
