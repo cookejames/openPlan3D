@@ -395,7 +395,10 @@
         <h2 id="library-action-title" class="text-lg font-semibold">{actionDialog.type === 'rename' ? $t('library.renameTitle') : $t('library.deleteTitle')}</h2>
         <p id="library-action-description" class="mt-2 break-words text-sm text-gray-500">
           {#if actionDialog.type === 'rename'}{$t('library.renameHelp', { name: actionDialog.name })}
-          {:else}{$t('library.deleteHelp', { name: actionDialog.name })}{/if}
+          {:else}
+            {@const cloud = signedIn ? $cloudMeta[actionDialog.id] : undefined}
+            {$t(!cloud ? 'library.deleteHelp' : cloud.isOwner ? 'library.deleteHelpCloudOwner' : 'library.deleteHelpCloudShared', { name: actionDialog.name })}
+          {/if}
         </p>
         {#if actionDialog.type === 'rename'}
           <label for="library-project-name" class="mt-4 block text-sm font-medium">{$t('library.name')}</label>

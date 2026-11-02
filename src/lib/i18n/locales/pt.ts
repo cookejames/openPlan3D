@@ -166,6 +166,8 @@ export const pt = {
   "library.deleteTitle": "Excluir projeto",
   "library.renameHelp": "Escolha um nome para {name}.",
   "library.deleteHelp": "Excluir “{name}” e seu histórico de versões deste navegador? Esta ação não pode ser desfeita.",
+  "library.deleteHelpCloudOwner": "Excluir “{name}” da nuvem e deste navegador? Todas as pessoas com quem você compartilhou perderão o acesso, qualquer link público de visualização deixará de funcionar e as versões online serão removidas. Dispositivos que já baixaram o projeto mantêm a própria cópia. Esta ação não pode ser desfeita.",
+  "library.deleteHelpCloudShared": "Remover “{name}” deste navegador? Ele continua na nuvem para o proprietário e os outros editores e voltará a aparecer aqui enquanto estiver compartilhado com você. Somente o proprietário pode excluí-lo para todos.",
   "library.name": "Nome do projeto",
   "library.saving": "Salvando nome…",
   "library.deleting": "Excluindo projeto…",

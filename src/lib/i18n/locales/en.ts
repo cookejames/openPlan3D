@@ -166,6 +166,8 @@ export const en = {
   "library.deleteTitle": "Delete project",
   "library.renameHelp": "Choose a name for {name}.",
   "library.deleteHelp": "Delete “{name}” and its version history from this browser? This cannot be undone.",
+  "library.deleteHelpCloudOwner": "Delete “{name}” from the cloud and this browser? Everyone you shared it with loses access, any public view link stops working, and its online versions are removed. Devices that already downloaded it keep their own copy. This cannot be undone.",
+  "library.deleteHelpCloudShared": "Remove “{name}” from this browser? It stays in the cloud for its owner and other editors, and will reappear here while it is shared with you. Only the owner can delete it for everyone.",
   "library.name": "Project name",
   "library.saving": "Saving name…",
   "library.deleting": "Deleting project…",
