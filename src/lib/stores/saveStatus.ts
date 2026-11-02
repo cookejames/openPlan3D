@@ -158,7 +158,14 @@ async function persist(manual: boolean): Promise<boolean> {
 export function autoSave() { return persist(false); }
 
 /** Manual save */
-export function manualSave() { return persist(true); }
+export async function manualSave() {
+  const ok = await persist(true);
+  const id = get(currentProject)?.id;
+  if (ok && id) {
+    try { void projectStore.flush(id).catch(() => {}); } catch { /* sync is best effort */ }
+  }
+  return ok;
+}
 
 /** Preserve this tab's version under a fresh ID before changing editor state. */
 export async function saveCurrentAsCopy(): Promise<boolean> {

@@ -221,3 +221,16 @@ it('does not discard edits made while a recovery copy is being saved', async () 
   expect(get(saveError)).toContain('made more edits');
   expect(get(saveState)).toBe('unsaved'); expect(get(saveConflict)).toBe(true);
 });
+
+it('manual save flushes the cloud push after a successful local save, but autosave does not', async () => {
+  const flush = vi.spyOn(projectStore, 'flush').mockResolvedValue();
+  const id = get(currentProject)!.id;
+  expect(await manualSave()).toBe(true);
+  expect(flush).toHaveBeenCalledWith(id);
+  flush.mockClear();
+  await autoSave();
+  expect(flush).not.toHaveBeenCalled();
+  vi.mocked(projectStore.save).mockRejectedValueOnce(new Error('x'));
+  expect(await manualSave()).toBe(false);
+  expect(flush).not.toHaveBeenCalled();
+});

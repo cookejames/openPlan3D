@@ -31,6 +31,9 @@
   import { initVersionHistory, stopVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
   import VersionHistoryPanel from './VersionHistoryPanel.svelte';
   import AccountButton from '$lib/components/AccountButton.svelte';
+  import { authState } from '$lib/stores/auth';
+  import { projectStore } from '$lib/services/projectStore';
+  import { remoteChange, syncBusy, syncError, keptCopyName, reloadLatest, keepMineAsCopy, startCloudWatch } from '$lib/stores/cloudSync';
 
   const openingLifetime = new AbortController();
   onDestroy(() => openingLifetime.abort());
@@ -138,6 +141,13 @@
   async function save() {
     await manualSave();
   }
+
+  const syncStatuses = projectStore.syncStatus;
+  const openSyncStatus = $derived($authState.status === 'signedIn' && $currentProject ? $syncStatuses[$currentProject.id] : undefined);
+  const SYNC_LABELS = { synced: 'editor.sync.synced', syncing: 'editor.sync.syncing', offline: 'editor.sync.offline', conflict: 'editor.sync.conflict', error: 'editor.sync.error' } as const;
+  const syncLabelKey = $derived(openSyncStatus && openSyncStatus in SYNC_LABELS ? SYNC_LABELS[openSyncStatus as keyof typeof SYNC_LABELS] : null);
+  const syncTone = $derived(openSyncStatus === 'synced' ? 'text-emerald-400' : openSyncStatus === 'syncing' ? 'text-amber-300 animate-pulse' : openSyncStatus === 'offline' ? 'text-white/50' : 'text-red-300');
+  const showRemote = $derived($remoteChange && $currentProject?.id === $remoteChange.id && openSyncStatus !== 'conflict');
 
   // Relative time for tooltip
   let secondsSinceSave = $state<number | null>(null);
@@ -265,6 +275,7 @@
 
   onMount(() => {
     const stopAutoSave = initAutoSave();
+    const stopCloudWatch = startCloudWatch();
     initVersionHistory();
     const openSettings = () => { if (!hasOpenModal()) settingsOpen = true; };
     window.addEventListener('open-settings', openSettings);
@@ -298,6 +309,7 @@
       window.removeEventListener('open-settings', openSettings);
       if (get(saveState) === 'unsaved') void autoSave();
       stopAutoSave();
+      stopCloudWatch();
       stopVersionHistory();
       document.removeEventListener('click', handleClickOutside, true);
       document.removeEventListener('keydown', handleKeydown, true);
@@ -689,6 +701,9 @@
     {/if}
     </span>
   </span>
+  {#if syncLabelKey}
+    <span data-testid="sync-status" class="shrink-0 whitespace-nowrap text-[11px] font-medium max-xl:hidden {syncTone}">{$t(syncLabelKey)}</span>
+  {/if}
   <button onclick={save} class="px-3 py-1.5 max-xl:px-2.5 text-sm bg-white text-slate-800 font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
     {$t('saveControls.save')}
   </button>
@@ -704,6 +719,28 @@
       <button class="font-semibold underline" onclick={save}>{$t('saveControls.retry')}</button>
     {/if}
     <button class="font-semibold underline" onclick={onExportJSON}>{$t('saveControls.backup')}</button>
+  </div>
+{/if}
+
+{#if openSyncStatus === 'conflict'}
+  <div role="alert" class="flex flex-wrap items-center gap-3 bg-amber-50 border-b border-amber-200 px-4 py-3 text-sm text-amber-900">
+    <span class="flex-1 min-w-48"><strong>{$t('editor.sync.conflictTitle')}</strong> {$t('editor.sync.conflictBody')}</span>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={reloadLatest}>{$syncBusy ? $t('editor.sync.working') : $t('editor.sync.loadLatest')}</button>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={keepMineAsCopy}>{$t('editor.sync.keepMine')}</button>
+    {#if $syncError}<span class="basis-full text-red-700">{projectServiceMessage($syncError, $locale)}</span>{/if}
+  </div>
+{:else if showRemote && $remoteChange}
+  <div role="status" class="flex flex-wrap items-center gap-3 bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-900">
+    <span class="flex-1 min-w-48">{$authState.status === 'signedIn' && $authState.user.email.toLowerCase() === $remoteChange.updatedBy.toLowerCase() ? $t('editor.sync.remoteUpdatedSelf') : $t('editor.sync.remoteUpdated', { email: $remoteChange.updatedBy })}</span>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={reloadLatest}>{$syncBusy ? $t('editor.sync.reloading') : $t('editor.sync.reload')}</button>
+    <button class="font-semibold underline" onclick={() => remoteChange.set(null)}>{$t('editor.sync.dismiss')}</button>
+    {#if $syncError}<span class="basis-full text-red-700">{projectServiceMessage($syncError, $locale)}</span>{/if}
+  </div>
+{/if}
+{#if $keptCopyName && openSyncStatus !== 'conflict'}
+  <div role="status" class="flex items-center gap-3 bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-sm text-emerald-900">
+    <span class="flex-1">{$t('editor.sync.copyKept', { name: $keptCopyName })}</span>
+    <button class="font-semibold underline" onclick={() => keptCopyName.set(null)}>{$t('editor.sync.dismiss')}</button>
   </div>
 {/if}
 

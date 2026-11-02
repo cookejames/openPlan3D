@@ -25,6 +25,14 @@ export interface SyncStore extends DataStore {
   /** Save the local version as a new local-only copy, then take the cloud's latest for the original. Returns the copy. */
   keepMineAsCopy(id: string): Promise<Project>;
   flush(id?: string): Promise<void>;
+  /**
+   * Watch a cloud-tracked project while it is open. Calls cb only when the cloud revision is newer than this
+   * browser's known revision and was written by someone other than the current user. Also refreshes cloudMeta.
+   * Returns an unsubscribe; a no-op when cloud is disabled, signed out or the project is not cloud-tracked.
+   */
+  watch(id: string, cb: (change: { rev: number; updatedBy: string }) => void): () => void;
+  /** Enter the conflict state (e.g. a remote change arrived while local edits are pending) and stop auto-push. */
+  markConflict(id: string): void;
   uploadToCloud(id: string): Promise<void>;
   /** Owner only. Resolves to the stored (normalised) editor list. */
   setEditors(id: string, emails: string[]): Promise<string[]>;
@@ -129,6 +137,8 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const redirty = new Set<string>();
   const failures = new Map<string, number>();
   const conflicted = new Set<string>();
+  /** Revisions pushed by this store instance, per project. */
+  const ownRevs = new Map<string, Set<number>>();
 
   // Thumbnails are optional: they never touch sync status and never retry.
   const thumbTimers = new Map<string, unknown>();
@@ -201,6 +211,10 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       return;
     }
     failures.delete(id);
+    // Remember it before the meta write so a watch snapshot of our own push is never reported as remote.
+    let own = ownRevs.get(id);
+    if (!own) ownRevs.set(id, own = new Set());
+    own.add(newRev);
     const again = redirty.delete(id);
     try {
       await deps.meta.write(id, { knownRev: newRev, pendingBaseRev: again ? newRev : null });
@@ -264,6 +278,42 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     syncStatus: { subscribe: status.subscribe },
     cloudMeta: { subscribe: cloudInfo.subscribe },
     flush,
+
+    watch(id, cb) {
+      if (!cloud || !deps.user()) return () => {};
+      let cancelled = false;
+      let stop: (() => void) | null = null;
+      void (async () => {
+        let meta: CloudSyncMeta | null;
+        try { meta = await deps.meta.read(id); } catch { return; }
+        if (cancelled || !meta || meta.knownRev === null) return;
+        try {
+          stop = cloud.watchProject(id, cm => {
+            if (cancelled || !cm) return;
+            noteCloud(cm);
+            if (ownRevs.get(id)?.has(cm.rev)) return;
+            void (async () => {
+              // A push in flight may be the author of this snapshot: let it record its revision first.
+              const running = inFlight.get(id);
+              if (running) { try { await running; } catch { /* its own error handling already ran */ } }
+              if (cancelled) return;
+              let current: CloudSyncMeta | null;
+              try { current = await deps.meta.read(id); } catch { return; }
+              if (cancelled || !current || current.knownRev === null) return;
+              if (cm.rev > current.knownRev && !ownRevs.get(id)?.has(cm.rev)) cb({ rev: cm.rev, updatedBy: cm.updatedBy });
+            })();
+          });
+        } catch { return; }
+        if (cancelled) { stop?.(); stop = null; }
+      })();
+      return () => { cancelled = true; stop?.(); stop = null; };
+    },
+
+    markConflict(id) {
+      conflicted.add(id);
+      unschedule(id);
+      setStatus(id, 'conflict');
+    },
 
     async load(id) {
       if (!cloud || !deps.user()) return local.load(id);
