@@ -1,7 +1,7 @@
 import { derived, get, writable, type Readable } from 'svelte/store';
 import { authState } from './auth';
 import { currentProject, loadProject } from './project';
-import { manualSave, markClean } from './saveStatus';
+import { autoSave, markClean, saveState } from './saveStatus';
 import { readOnlyReason, setEditLockReadOnly } from './readOnly';
 import { projectStore } from '$lib/services/projectStore';
 import { cloudStore, type CloudStore, type PresenceEntry } from '$lib/services/cloudStore';
@@ -81,6 +81,8 @@ export function createEditLock(deps: EditLockDeps, state = stateInner) {
   let firstSnapshot = false;
   /** Our presence doc was removed (pagehide); any write must re-enter through a fresh evaluation. */
   let removed = false;
+  /** Released for sign-out: stay inactive for this user until the user changes. */
+  let releasedUid: string | null = null;
 
   const patch = (p: Partial<EditLockState>) => state.update(s => ({ ...s, ...p }));
   const others = () => liveEditors(latest.filter(e => e.sessionId !== deps.sessionId), deps.now());
@@ -178,27 +180,29 @@ export function createEditLock(deps: EditLockDeps, state = stateInner) {
   }
 
   /** Stop heartbeat and subscription, remove our presence (best effort) and restore editability. */
-  function end() {
+  function end(): Promise<void> {
     gen++;
     const id = pid;
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = null;
     unwatch?.();
     unwatch = null;
-    if (id && deps.presence) void deps.presence.removePresence(id, deps.sessionId).catch(() => {});
+    const removal = id && deps.presence ? deps.presence.removePresence(id, deps.sessionId).catch(() => {}) : Promise.resolve();
     pid = null;
     transitioning = false;
     deps.setReadOnly(false);
     state.set(initial);
+    return removal;
   }
 
   return {
     /** Re-target on any change of user / project / tracking / share view. */
     update(source: LockSource) {
-      const active = !!deps.presence && !!source.user && !!source.projectId && source.cloudTracked && !source.shareView;
+      if (releasedUid !== null && source.user?.uid !== releasedUid) releasedUid = null;
+      const active = releasedUid === null && !!deps.presence && !!source.user && !!source.projectId && source.cloudTracked && !source.shareView;
       const next = active ? `${source.user!.uid}|${source.projectId}` : '';
       if (next === key) return;
-      if (key) end();
+      if (key) void end();
       key = next;
       if (!next) return;
       user = source.user;
@@ -241,7 +245,14 @@ export function createEditLock(deps: EditLockDeps, state = stateInner) {
     },
     /** Restored from the back/forward cache: presence was removed on pagehide, so re-evaluate and claim or view. */
     onPageShow(persisted: boolean) { if (persisted && pid) restart(); },
-    dispose() { if (key) end(); key = ''; },
+    dispose() { if (key) void end(); key = ''; },
+    /** Remove our presence while still signed in (sign-out), and stay inactive until the user changes. */
+    async release() {
+      releasedUid = user?.uid ?? null;
+      if (!key) return;
+      key = '';
+      await end();
+    },
     isActive: () => key !== '',
   };
 }
@@ -252,7 +263,8 @@ export function startEditLock(): () => void {
     presence: cloudStore,
     now: () => Date.now(),
     sessionId,
-    save: () => manualSave(),
+    // Only real edits are saved: a save of unchanged bytes would push a revision the new holder just loaded past, and its next save would conflict.
+    save: () => (get(saveState) === 'saved' ? Promise.resolve(true) : autoSave()),
     flush: id => projectStore.flush(id),
     loadLatest: id => projectStore.loadLatest(id),
     loadProject,
@@ -285,3 +297,4 @@ export function startEditLock(): () => void {
 
 let currentEditLock: ReturnType<typeof createEditLock> | null = null;
 export const editAnyway = () => currentEditLock?.editAnyway() ?? Promise.resolve(false);
+export const releaseEditLock = () => currentEditLock?.release() ?? Promise.resolve();

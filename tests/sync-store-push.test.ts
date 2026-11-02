@@ -78,13 +78,13 @@ describe('sync store push', () => {
     await s.store.save(project());
     await vi.advanceTimersByTimeAsync(3_000);
     await s.store.save(project('p1', 'Renamed'));
-    expect(s.metas.get('p1')).toEqual({ knownRev: 3, pendingBaseRev: 3 });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 3, pendingBaseRev: 3, uid: 'u' });
     await vi.advanceTimersByTimeAsync(4_000);
     expect(s.cloud.pushRevision).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(s.cloud.pushRevision).toHaveBeenCalledTimes(1);
     expect(s.cloud.pushRevision).toHaveBeenCalledWith('p1', 3, JSON.stringify(project('p1', 'Renamed')), 'Renamed');
-    expect(s.metas.get('p1')).toEqual({ knownRev: 4, pendingBaseRev: null });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 4, pendingBaseRev: null, uid: 'u' });
     expect(s.cloud.pruneRevs).toHaveBeenCalledWith('p1', 4, 10);
     expect(s.history).toEqual(['syncing', 'synced']);
     s.store.dispose();
@@ -105,7 +105,7 @@ describe('sync store push', () => {
     await s.store.save(project());
     await vi.advanceTimersByTimeAsync(5_000);
     expect(status(s)).toBe('conflict');
-    expect(s.metas.get('p1')).toEqual({ knownRev: 3, pendingBaseRev: 3 });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 3, pendingBaseRev: 3, uid: 'u' });
     await vi.advanceTimersByTimeAsync(600_000);
     expect(s.cloud.pushRevision).toHaveBeenCalledTimes(1);
     s.store.dispose();
@@ -158,13 +158,13 @@ describe('sync store push', () => {
     await s.store.save(project('p1', 'Edited'));
     release();
     await vi.advanceTimersByTimeAsync(0);
-    expect(s.metas.get('p1')).toEqual({ knownRev: 4, pendingBaseRev: 4 });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 4, pendingBaseRev: 4, uid: 'u' });
     await vi.advanceTimersByTimeAsync(5_000);
     expect(s.cloud.pushRevision).toHaveBeenCalledTimes(2);
     expect(s.cloud.pushRevision).toHaveBeenLastCalledWith('p1', 4, JSON.stringify(project('p1', 'Edited')), 'Edited');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(s.cloud.pushRevision).toHaveBeenCalledTimes(2);
-    expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null, uid: 'u' });
     s.store.dispose();
   });
 
@@ -193,7 +193,7 @@ describe('sync store push', () => {
     await s.local.save(project());
     await s.store.uploadToCloud('p1');
     expect(s.cloud.createProject).toHaveBeenCalledWith(project());
-    expect(s.metas.get('p1')).toEqual({ knownRev: 0, pendingBaseRev: null });
+    expect(s.metas.get('p1')).toEqual({ knownRev: 0, pendingBaseRev: null, uid: 'u' });
     s.store.dispose();
   });
 

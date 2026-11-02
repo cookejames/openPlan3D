@@ -192,6 +192,24 @@ describe('edit lock', () => {
     expect(get(h.state).phase).toBe('off');
   });
 
+  it('release removes presence before resolving and stays inactive for that user until the user changes', async () => {
+    const h = setup();
+    await open(h, [entry()]);
+    await h.lock.release();
+    expect(h.calls.at(-1)).toBe('remove');
+    expect(get(h.state).phase).toBe('off');
+    h.presence.writePresence.mockClear();
+    h.lock.update(src());
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
+    expect(h.presence.writePresence).not.toHaveBeenCalled();
+    h.lock.update(src({ user: null }));
+    h.lock.update(src());
+    h.emit([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.presence.writePresence).toHaveBeenCalled();
+    h.lock.dispose();
+  });
+
   it('does nothing when signed out, untracked, or in a share view', async () => {
     for (const s of [src({ user: null }), src({ cloudTracked: false }), src({ shareView: true }), src({ projectId: null })]) {
       const h = setup();

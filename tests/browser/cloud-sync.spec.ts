@@ -54,7 +54,7 @@ async function saveAndFlush(page: Page) {
 const card = (page: Page, name: string) =>
   page.locator('div.group', { has: page.getByRole('link', { name: `Open ${name}`, exact: true }) });
 
-test('cloud sync: upload, share with an editor, conflict, remote notice and public link', async ({ browser }) => {
+test('cloud sync: upload, share with an editor, edit lock, public link and sign-out', async ({ browser }) => {
   test.setTimeout(180_000);
   await resetEmulators();
   const alice = await newUser(browser);
@@ -94,34 +94,24 @@ test('cloud sync: upload, share with an editor, conflict, remote notice and publ
     await expect(B.getByTestId('sync-status')).toHaveText('Synced');
   });
 
-  await test.step('conflict: bob edits after alice, keeps his as a copy', async () => {
+  await test.step('edit lock: alice opens while bob is editing and follows his saves', async () => {
     await A.getByRole('link', { name: 'Open Alice plan', exact: true }).first().click();
-    await expect(A.getByTitle('Click to rename', { exact: true })).toHaveText('Alice plan');
-    await rename(A, 'Alice v2');
-    await saveAndFlush(A);
-    await expect(B.getByText('Updated by alice@example.com.')).toBeVisible();
-    await rename(B, 'Bob edit');
-    await B.keyboard.press('Control+s');
-    await expect(B.getByText('This project was changed elsewhere.')).toBeVisible();
-    await B.getByRole('button', { name: 'Keep mine as a copy' }).click();
-    await expect(B.getByText(/Your version was saved as/)).toBeVisible();
-    await expect(B.getByTitle('Click to rename', { exact: true })).toHaveText('Alice v2');
-    await B.getByRole('link', { name: 'Projects' }).click();
-    await expect(B.getByRole('link', { name: 'Open Bob edit (My version)', exact: true }).first()).toBeVisible();
-    await expect(B.getByRole('link', { name: 'Open Alice v2', exact: true }).first()).toBeVisible();
-    await B.getByRole('link', { name: 'Open Alice v2', exact: true }).first().click();
-    await expect(B.getByTitle('Click to rename', { exact: true })).toHaveText('Alice v2');
+    const banner = A.getByTestId('lock-banner');
+    await expect(banner).toContainText(`${BOB} is editing this plan`);
+    await expect(A.getByRole('button', { name: 'Alice plan', exact: true })).toBeDisabled();
+    await rename(B, 'Bob v2');
+    await saveAndFlush(B);
+    await expect(A.getByRole('button', { name: 'Bob v2', exact: true })).toBeDisabled();
   });
 
-  await test.step('remote notice: bob is clean, alice changes it again', async () => {
-    await expect(B.getByTestId('sync-status')).toHaveText('Synced');
+  await test.step('edit anyway: alice takes over and bob switches to view only', async () => {
+    await A.getByTestId('lock-banner').getByRole('button', { name: 'Edit anyway' }).click();
+    await expect(A.getByTestId('lock-banner')).toHaveCount(0);
+    await expect(B.getByTestId('lock-banner')).toContainText(`${ALICE} took over editing`);
+    await expect(B.getByRole('button', { name: 'Bob v2', exact: true })).toBeDisabled();
     await rename(A, 'Alice v3');
     await saveAndFlush(A);
-    const notice = B.getByRole('status').filter({ hasText: 'Updated by alice@example.com.' });
-    await expect(notice).toBeVisible();
-    await notice.getByRole('button', { name: 'Reload' }).click();
-    await expect(B.getByTitle('Click to rename', { exact: true })).toHaveText('Alice v3');
-    await expect(notice).toHaveCount(0);
+    await expect(B.getByRole('button', { name: 'Alice v3', exact: true })).toBeDisabled();
   });
 
   let shareUrl = '';
@@ -155,6 +145,28 @@ test('cloud sync: upload, share with an editor, conflict, remote notice and publ
     await expect(dialog.getByRole('switch', { name: 'Public view link' })).toHaveAttribute('aria-checked', 'false');
     await C.goto(shareUrl);
     await expect(C.getByRole('alert')).toContainText('invalid or sharing has been turned off');
+  });
+
+  await test.step('bob signs out: the editor closes and cloud plans leave his browser', async () => {
+    await B.getByRole('button', { name: 'Account menu', exact: true }).click();
+    await B.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(B).toHaveURL(/\/$/);
+    await expect(B.getByRole('button', { name: 'Sign in' }).first()).toBeVisible();
+    await expect(B.getByRole('link', { name: 'Open Alice v3', exact: true })).toHaveCount(0);
+    const stored = await B.evaluate(() => new Promise<number>((resolve, reject) => {
+      const req = indexedDB.open('openplan3d-local');
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const count = req.result.transaction('projects').objectStore('projects').count();
+        count.onsuccess = () => { req.result.close(); resolve(count.result); };
+      };
+    }));
+    expect(stored).toBe(0);
+  });
+
+  await test.step('bob signs back in and the plan is in the cloud again', async () => {
+    await signIn(B, BOB);
+    await expect(card(B, 'Alice v3').getByText('In cloud', { exact: true })).toBeVisible();
   });
 
   await Promise.all([alice.context.close(), bob.context.close(), carol.context.close()]);

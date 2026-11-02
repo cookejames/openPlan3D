@@ -77,7 +77,7 @@ describe('sync store pull', () => {
       const p = await s.store.load('p1');
       expect(p?.name).toBe('Cloud');
       expect(s.local.adopt).toHaveBeenCalledWith('p1', await s.cloud.downloadLatest.mock.results[0].value);
-      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
+      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null, uid: 'u' });
       expect(st(s)).toBe('synced');
       expect(get(s.store.cloudMeta).p1).toMatchObject({ ownerUid: 'u', isOwner: true, updatedBy: 'a@b.c' });
       s.store.dispose();
@@ -86,7 +86,7 @@ describe('sync store pull', () => {
     it('older knownRev with no pending pulls the newer cloud copy', async () => {
       const s = setup();
       expect((await s.store.load('p1'))?.name).toBe('Cloud');
-      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
+      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null, uid: 'u' });
       expect(st(s)).toBe('synced');
       s.store.dispose();
     });
@@ -268,7 +268,7 @@ describe('sync store pull', () => {
       expect(st(s)).toBe('conflict');
       const p = await s.store.loadLatest('p1');
       expect(p.name).toBe('Cloud');
-      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
+      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null, uid: 'u' });
       expect(st(s)).toBe('synced');
       await s.store.save(make('p1', 'After'));
       await vi.advanceTimersByTimeAsync(5_000);
@@ -283,20 +283,19 @@ describe('sync store pull', () => {
       expect(copy.id).toBe('copy');
       expect(copy.name).toBe('Local (My version)');
       expect(JSON.parse(s.disk.get('p1')!).name).toBe('Cloud');
-      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null });
+      expect(s.metas.get('p1')).toEqual({ knownRev: 5, pendingBaseRev: null, uid: 'u' });
       expect(s.metas.has('copy')).toBe(false);
       s.store.dispose();
     });
   });
 
   describe('signed out', () => {
-    it('delegates load, list and delete to local with no cloud or meta calls', async () => {
-      const s = setup({ signedIn: false });
+    it('delegates load, list and delete of a local-only project to local with no cloud calls', async () => {
+      const s = setup({ signedIn: false, meta: null });
       expect((await s.store.load('p1'))?.name).toBe('Local');
       expect((await s.store.list()).map(r => r.id)).toEqual(['p1']);
       await s.store.delete('p1');
       expect(s.local.delete).toHaveBeenCalledWith('p1');
-      expect(s.meta.read).not.toHaveBeenCalled();
       expect(s.cloud.readMeta).not.toHaveBeenCalled();
       expect(s.cloud.listProjects).not.toHaveBeenCalled();
       expect(s.cloud.deleteProject).not.toHaveBeenCalled();

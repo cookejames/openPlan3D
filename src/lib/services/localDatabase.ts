@@ -201,7 +201,8 @@ export async function libraryBackup(): Promise<string> {
   } finally { db.close(); }
 }
 
-export interface CloudSyncMeta { knownRev: number | null; pendingBaseRev: number | null }
+/** `uid` is the account the cloud copy belongs to; records written before it was kept have none. */
+export interface CloudSyncMeta { knownRev: number | null; pendingBaseRev: number | null; uid?: string | null }
 
 export function syncMetaKey(id: string) {
   return `cloud-sync:${id}`;
@@ -214,7 +215,8 @@ export async function readSyncMeta(id: string): Promise<CloudSyncMeta | null> {
     const value = JSON.parse(raw);
     const rev = (v: unknown) => v === null || Number.isFinite(v);
     if (!value || typeof value !== 'object' || !rev(value.knownRev) || !rev(value.pendingBaseRev)) return null;
-    return { knownRev: value.knownRev, pendingBaseRev: value.pendingBaseRev };
+    const uid = typeof value.uid === 'string' ? value.uid : null;
+    return { knownRev: value.knownRev, pendingBaseRev: value.pendingBaseRev, ...(uid ? { uid } : {}) };
   } catch {
     return null;
   }

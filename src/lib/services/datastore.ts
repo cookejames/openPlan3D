@@ -25,6 +25,8 @@ export interface LocalDataStore extends DataStore {
   cacheThumbnail(id: string, dataUrl: string, version: string): Promise<void>;
   /** The cloud version of a thumbnail written by cacheThumbnail, or null (none, or a locally rendered one). */
   getCachedThumbnailVersion(id: string): Promise<string | null>;
+  /** Delete a project and its local data without the opened-revision check: sign-out clears cloud copies this tab never listed. */
+  discard(id: string): Promise<void>;
 }
 
 
@@ -72,6 +74,14 @@ export async function downloadLibraryBackup() {
   link.download = 'openplan3d-library-backup.json';
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function removeProject(tx: IDBTransaction, id: string) {
+  tx.objectStore('projects').delete(id);
+  tx.objectStore('thumbnails').delete(id);
+  tx.objectStore('history').delete(id);
+  tx.objectStore('meta').delete(syncMetaKey(id));
+  tx.objectStore('meta').delete(thumbCacheKey(id));
 }
 
 /** Each browser document remembers only revisions it actually opened or saved. */
@@ -171,13 +181,19 @@ export function createLocalStore(): LocalDataStore {
           const projects = tx.objectStore('projects');
           const expected = listed.has(id) ? listed.get(id) : opened.get(id);
           if (((await request(projects.get(id))) ?? null) !== (expected ?? null)) throw new ProjectConflictError();
-          projects.delete(id);
-          tx.objectStore('thumbnails').delete(id);
-          tx.objectStore('history').delete(id);
-          tx.objectStore('meta').delete(syncMetaKey(id));
-          tx.objectStore('meta').delete(thumbCacheKey(id));
+          removeProject(tx, id);
         }));
         // Retain the opened revision so this editor cannot recreate a deleted plan.
+        listed.delete(id);
+        notifyLibraryChange(id);
+      });
+    },
+
+    async discard(id) {
+      await mutateLibrary(async () => {
+        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history', 'meta'], 'readwrite', async tx => {
+          removeProject(tx, id);
+        }));
         listed.delete(id);
         notifyLibraryChange(id);
       });

@@ -41,6 +41,13 @@ export interface SyncStore extends DataStore {
   /** Flushes pending edits, then publishes a read-only snapshot. Resolves to the share token. */
   enableSharing(id: string): Promise<string>;
   disableSharing(id: string): Promise<void>;
+  /**
+   * Pushes waiting edits (bounded by the cloud timeout), then lists this account's cloud plans whose changes
+   * are still only in this browser. Call before signing out.
+   */
+  unsyncedProjects(): Promise<{ id: string; name: string }[]>;
+  /** Removes this browser's copies of the account's cloud plans, including unpushed edits. Call after signing out. */
+  discardCloudCopies(uid: string): Promise<void>;
   /** Clear timers and listeners. */
   dispose(): void;
 }
@@ -63,6 +70,8 @@ export interface SyncStoreDeps {
   readLocal?: (id: string) => Promise<string | null>;
   /** Max time cloud work may delay opening or listing a project. Default 8000. */
   cloudTimeoutMs?: number;
+  /** Resolves once the signed-in user is known, so a signed-in user's cloud copies are not hidden while auth loads. */
+  authReady?: () => Promise<void>;
 }
 
 const PUSH_DELAY = 5_000;
@@ -83,8 +92,20 @@ function jpegBlobFromDataUrl(dataUrl: string): Blob | null {
   return new Blob([bytes], { type: 'image/jpeg' });
 }
 
+/**
+ * A cloud copy is shown only to the account it belongs to: never while signed out, never to another account.
+ * Records from before ownership was kept belong to whoever is signed in.
+ */
+function visibleTo(meta: CloudSyncMeta | null, uid: string | null): boolean {
+  if (!meta || meta.knownRev === null) return true;
+  return uid !== null && (meta.uid == null || meta.uid === uid);
+}
+
 export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const { local, cloud } = deps;
+  const authReady = deps.authReady ?? (() => Promise.resolve());
+  /** Every sync record is stamped with the signed-in account. */
+  const writeMeta = (id: string, meta: CloudSyncMeta) => deps.meta.write(id, { ...meta, uid: deps.user()?.uid ?? meta.uid ?? null });
   const setTimer = deps.timers?.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearTimer = deps.timers?.clearTimeout ?? ((handle: any) => clearTimeout(handle));
   const readLocal = deps.readLocal ?? ((id: string) => readRecord('projects', id));
@@ -164,7 +185,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     if (incoming.id !== id) throw new Error('The cloud project ID does not match.');
     if (cancelled()) return;
     await local.adopt(id, raw);
-    await deps.meta.write(id, { knownRev: cm.rev, pendingBaseRev: null });
+    await writeMeta(id, { knownRev: cm.rev, pendingBaseRev: null });
     if (cm.thumbPath) void fetchThumb(cm).then(ok => { if (ok) thumbsUpdated.update(n => n + 1); });
     conflicted.delete(id);
     failures.delete(id);
@@ -257,7 +278,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     own.add(newRev);
     const again = redirty.delete(id);
     try {
-      await deps.meta.write(id, { knownRev: newRev, pendingBaseRev: again ? newRev : null });
+      await writeMeta(id, { knownRev: newRev, pendingBaseRev: again ? newRev : null });
     } catch {
       // The push landed; a stale base would only surface as a conflict, which the user can resolve.
     }
@@ -375,10 +396,15 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     },
 
     async load(id) {
-      if (!cloud || !deps.user()) return local.load(id);
+      if (!cloud) return local.load(id);
+      await authReady();
+      const user = deps.user();
       let meta: CloudSyncMeta | null;
       try { meta = await deps.meta.read(id); } catch { return local.load(id); }
+      if (!visibleTo(meta, user?.uid ?? null)) return null;
+      if (!user) return local.load(id);
       const tracked = !!meta && meta.knownRev !== null;
+      if (tracked && meta!.uid == null) { try { await writeMeta(id, meta!); } catch { /* adopt on a later read */ } }
       try {
         await withTimeout(async cancelled => {
           const cm = await cloud.readMeta(id);
@@ -418,8 +444,25 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     },
 
     async list() {
-      const rows = await local.list();
-      if (!cloud || !deps.user()) return rows;
+      if (!cloud) return local.list();
+      await authReady();
+      const user = deps.user();
+      const rows: Awaited<ReturnType<DataStore['list']>> = [];
+      for (const row of await local.list()) {
+        let meta: CloudSyncMeta | null;
+        try { meta = await deps.meta.read(row.id); } catch { rows.push(row); continue; }
+        if (visibleTo(meta, user?.uid ?? null)) {
+          if (user && meta && meta.knownRev !== null && meta.uid == null) { try { await writeMeta(row.id, meta); } catch { /* later */ } }
+          rows.push(row);
+          continue;
+        }
+        // Another account's copy, or left behind by an interrupted sign-out. Clear it unless it holds edits
+        // that never reached the cloud; those stay hidden until their account signs in again.
+        unschedule(row.id);
+        forget(row.id);
+        if (meta!.pendingBaseRev === null) { try { await local.discard(row.id); } catch { /* retried on the next list */ } }
+      }
+      if (!user) return rows;
       let remote: CloudProjectMeta[];
       try { remote = await withTimeout(() => cloud.listProjects()); } catch { return rows; }
       for (const m of remote) noteCloud(m);
@@ -496,7 +539,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       if (inFlight.has(id)) { redirty.add(id); return; }
       const meta = await deps.meta.read(id);
       if (!meta || meta.knownRev === null) { setStatus(id, 'local'); return; }
-      if (meta.pendingBaseRev === null) await deps.meta.write(id, { knownRev: meta.knownRev, pendingBaseRev: meta.knownRev });
+      if (meta.pendingBaseRev === null) await writeMeta(id, { knownRev: meta.knownRev, pendingBaseRev: meta.knownRev });
       if (inFlight.has(id)) { redirty.add(id); return; }
       if (conflicted.has(id)) return;
       setStatus(id, 'syncing');
@@ -514,7 +557,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
         const blob = thumb ? jpegBlobFromDataUrl(thumb) : null;
         if (blob) await cloud.uploadThumbnail(id, blob);
       } catch { /* optional */ }
-      await deps.meta.write(id, { knownRev: 0, pendingBaseRev: null });
+      await writeMeta(id, { knownRev: 0, pendingBaseRev: null });
       // Fill cloudMeta now so the library offers Share… without waiting for the next list.
       if (created?.id) noteCloud(created);
       setStatus(id, 'synced');
@@ -541,6 +584,36 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       await requireTracked(id);
       await cloud!.disableSharing(id);
       cloudInfo.update(all => (all[id] ? { ...all, [id]: { ...all[id], shareToken: null } } : all));
+    },
+
+    async unsyncedProjects() {
+      if (!cloud || !deps.user()) return [];
+      try { await withTimeout(() => flush()); } catch { /* still pending: reported below */ }
+      const uid = deps.user()?.uid ?? null;
+      const result: { id: string; name: string }[] = [];
+      for (const row of await local.list()) {
+        let meta: CloudSyncMeta | null;
+        try { meta = await deps.meta.read(row.id); } catch { continue; }
+        if (meta && meta.knownRev !== null && meta.pendingBaseRev !== null && visibleTo(meta, uid)) result.push({ id: row.id, name: row.name });
+      }
+      return result;
+    },
+
+    async discardCloudCopies(uid) {
+      for (const id of [...timers.keys()]) unschedule(id);
+      for (const id of [...thumbTimers.keys()]) unscheduleThumb(id);
+      for (const row of await local.list()) {
+        let meta: CloudSyncMeta | null;
+        try { meta = await deps.meta.read(row.id); } catch { continue; }
+        if (!meta || meta.knownRev === null || !visibleTo(meta, uid)) continue;
+        await local.discard(row.id);
+      }
+      // The library shows nothing from the cloud while signed out.
+      cloudMetas.clear();
+      status.set({});
+      cloudInfo.set({});
+      conflicted.clear();
+      failures.clear();
     },
 
     dispose() {

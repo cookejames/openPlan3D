@@ -53,6 +53,24 @@ describe('cloud sync primitives', () => {
     expect(await readSyncMeta(project.id)).toBeNull();
   });
 
+  it('round trips the owning account', async () => {
+    await writeSyncMeta('owned', { knownRev: 1, pendingBaseRev: null, uid: 'u1' });
+    expect(await readSyncMeta('owned')).toEqual({ knownRev: 1, pendingBaseRev: null, uid: 'u1' });
+  });
+
+  it('discard removes a project this tab never listed, and the tab that had it open cannot recreate it', async () => {
+    const editor = createLocalStore();
+    const project = createDefaultProject('Cloud copy');
+    await editor.save(project);
+    await writeSyncMeta(project.id, { knownRev: 1, pendingBaseRev: null, uid: 'u1' });
+    const other = createLocalStore();
+    await expect(other.delete(project.id)).rejects.toBeInstanceOf(ProjectConflictError);
+    await other.discard(project.id);
+    expect((await rawRecords())[project.id]).toBeUndefined();
+    expect(await readSyncMeta(project.id)).toBeNull();
+    await expect(editor.save({ ...project, name: 'Late save' })).rejects.toBeInstanceOf(ProjectConflictError);
+  });
+
   it('deletes sync metadata directly', async () => {
     await writeSyncMeta('direct', { knownRev: 2, pendingBaseRev: 2 });
     await deleteSyncMeta('direct');

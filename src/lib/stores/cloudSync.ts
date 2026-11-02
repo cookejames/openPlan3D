@@ -83,3 +83,20 @@ export function startCloudWatch(): () => void {
   });
   return () => { stopTarget(); unwatch?.(); unwatch = null; };
 }
+
+/**
+ * Signing out (here or in another tab) removes this browser's copies of cloud plans, so an open cloud plan is
+ * closed: pending local saves are dropped and `leave` returns to the library.
+ */
+export function closeCloudPlanOnSignOut(leave: () => void): () => void {
+  let cloudPlan = false;
+  const stopPlan = derived([currentProject, projectStore.cloudMeta], ([p, meta]) => !!p && !!meta[p.id])
+    .subscribe(value => { cloudPlan = value; });
+  const stopAuth = authState.subscribe(a => {
+    if (a.status !== 'signedOut' || !cloudPlan) return;
+    cloudPlan = false;
+    markClean();
+    leave();
+  });
+  return () => { stopPlan(); stopAuth(); };
+}

@@ -35,7 +35,8 @@
   import AccountButton from '$lib/components/AccountButton.svelte';
   import { authState } from '$lib/stores/auth';
   import { projectStore } from '$lib/services/projectStore';
-  import { remoteChange, syncBusy, syncError, keptCopyName, reloadLatest, keepMineAsCopy, startCloudWatch } from '$lib/stores/cloudSync';
+  import { remoteChange, syncBusy, syncError, keptCopyName, reloadLatest, keepMineAsCopy, startCloudWatch, closeCloudPlanOnSignOut } from '$lib/stores/cloudSync';
+  import { goto } from '$app/navigation';
 
   const openingLifetime = new AbortController();
   onDestroy(() => openingLifetime.abort());
@@ -279,6 +280,7 @@
     const stopAutoSave = initAutoSave();
     const stopCloudWatch = startCloudWatch();
     const stopEditLock = startEditLock();
+    const stopCloudPlanOnSignOut = closeCloudPlanOnSignOut(() => { void goto(base || '/'); });
     initVersionHistory();
     const openSettings = () => { if (!hasOpenModal()) settingsOpen = true; };
     window.addEventListener('open-settings', openSettings);
@@ -314,6 +316,7 @@
       stopAutoSave();
       stopCloudWatch();
       stopEditLock();
+      stopCloudPlanOnSignOut();
       stopVersionHistory();
       document.removeEventListener('click', handleClickOutside, true);
       document.removeEventListener('keydown', handleKeydown, true);

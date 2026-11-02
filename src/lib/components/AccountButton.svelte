@@ -2,9 +2,10 @@
   import { onDestroy, onMount } from 'svelte';
   import { t } from '$lib/i18n';
   import {
-    authState, signIn, signOut, sendEmailLink, completeEmailLinkSignIn, completeEmailLinkOnLoad,
+    authState, signIn, sendEmailLink, completeEmailLinkSignIn, completeEmailLinkOnLoad,
     emailLinkState, emailLinkError,
   } from '$lib/stores/auth';
+  import { prepareSignOut, signOutAndClear } from '$lib/stores/accountSignOut';
 
   /** `library` sits on the dark library header; `toolbar` on the editor's dark top bar. */
   let { variant = 'library' }: { variant?: 'library' | 'toolbar' } = $props();
@@ -29,6 +30,8 @@
   let sentTo = $state<string | null>(null);
   let formError = $state<string | null>(null);
   let confirmEmail = $state('');
+  /** Cloud plans with changes that could not be uploaded; signing out would lose them, so ask first. */
+  let unsynced = $state<{ id: string; name: string }[] | null>(null);
 
   // Completes a sign-in when the page was opened from an email link (guarded to run once).
   onMount(() => { void completeEmailLinkOnLoad(); });
@@ -107,11 +110,16 @@
     }
   }
 
-  async function onSignOut() {
+  async function onSignOut(force = false) {
     if (busy) return;
     busy = true;
     try {
-      await signOut();
+      if (!force) {
+        const pending = await prepareSignOut();
+        if (pending.length) { unsynced = pending; return; }
+      }
+      await signOutAndClear();
+      unsynced = null;
       menuOpen = false;
     } catch (e) {
       console.error('Sign-out failed', e);
@@ -123,6 +131,7 @@
 
   function closeMenu(restoreFocus = false) {
     menuOpen = false;
+    unsynced = null;
     if (restoreFocus) trigger?.focus({ preventScroll: true });
   }
 
@@ -279,14 +288,34 @@
         {#if error}
           <p role="alert" class="px-3 pt-2 text-xs text-red-700">{error}</p>
         {/if}
-        <button
-          type="button"
-          onclick={onSignOut}
-          disabled={busy}
-          class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left disabled:opacity-50"
-        >
-          {busy ? $t('account.signingOut') : $t('account.signOut')}
-        </button>
+        {#if unsynced}
+          <div role="alert" class="px-3 py-2 text-sm text-gray-800">
+            <p class="font-medium">{$t('account.unsyncedTitle')}</p>
+            <p class="mt-1 text-xs text-gray-600">{$t('account.unsyncedBody')}</p>
+            <ul class="mt-1 list-disc pl-4 text-xs text-gray-800">
+              {#each unsynced as plan (plan.id)}<li class="truncate">{plan.name}</li>{/each}
+            </ul>
+            <div class="mt-3 flex flex-col gap-1.5">
+              <button type="button" onclick={() => onSignOut(true)} disabled={busy} class="w-full px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                {busy ? $t('account.signingOut') : $t('account.signOutAnyway')}
+              </button>
+              <button type="button" onclick={() => { unsynced = null; }} disabled={busy} class="w-full px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-800 hover:bg-gray-100 disabled:opacity-50">
+                {$t('account.stayCancel')}
+              </button>
+            </div>
+          </div>
+        {:else}
+          <button
+            type="button"
+            onclick={() => onSignOut()}
+            disabled={busy}
+            aria-busy={busy}
+            class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left disabled:opacity-50"
+          >
+            {busy ? $t('account.signingOut') : $t('account.signOut')}
+          </button>
+          <p class="px-3 pb-2 text-xs text-gray-500">{$t('account.signOutNote')}</p>
+        {/if}
       </div>
     {/if}
   </div>
