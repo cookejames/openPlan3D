@@ -20,6 +20,8 @@ export interface SyncStore extends DataStore {
   syncStatus: Readable<Record<string, SyncStatus>>;
   /** Ownership info for cloud projects seen by list/load, for the library UI. */
   cloudMeta: Readable<Record<string, CloudMetaInfo>>;
+  /** Increments whenever cloud thumbnails were cached in the background; call getThumbnails() again to pick them up. */
+  thumbnailsUpdated: Readable<number>;
   /** Discard local pending edits and take the cloud's latest revision. */
   loadLatest(id: string): Promise<Project>;
   /** Save the local version as a new local-only copy, then take the cloud's latest for the original. Returns the copy. */
@@ -68,6 +70,7 @@ const RETRY_DELAYS = [5_000, 15_000, 60_000, 300_000];
 const KEEP_REVS = 10;
 const CLOUD_TIMEOUT = 8_000;
 const THUMB_MAX_BYTES = 200 * 1024;
+const THUMB_FETCH_CONCURRENCY = 4;
 
 /** Decodes a base64 JPEG data URL without fetch. Null when it is not base64 or is over the size limit. */
 function jpegBlobFromDataUrl(dataUrl: string): Blob | null {
@@ -90,7 +93,15 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const setStatus = (id: string, value: SyncStatus) => status.update(all => (all[id] === value ? all : { ...all, [id]: value }));
 
   const cloudInfo = writable<Record<string, CloudMetaInfo>>({});
+  const thumbsUpdated = writable(0);
+  /** Latest cloud meta seen per project, for deciding which thumbnails to fetch. */
+  const cloudMetas = new Map<string, CloudProjectMeta>();
+  const thumbVersion = (m: CloudProjectMeta) => `${m.thumbPath}@${m.updatedAt?.getTime() ?? 0}`;
+  /** Versions we already tried this session, so a failed download is not retried on every refresh. */
+  const thumbAttempted = new Set<string>();
+  let thumbFill: Promise<void> | null = null;
   const noteCloud = (m: CloudProjectMeta) => {
+    cloudMetas.set(m.id, m);
     const info: CloudMetaInfo = {
       ownerUid: m.ownerUid,
       isOwner: m.ownerUid === deps.user()?.uid,
@@ -100,7 +111,35 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     };
     cloudInfo.update(all => ({ ...all, [m.id]: info }));
   };
+  /** Download one cloud thumbnail into the local cache. True when something was cached. */
+  async function fetchThumb(m: CloudProjectMeta): Promise<boolean> {
+    if (!cloud || !m.thumbPath) return false;
+    const version = thumbVersion(m);
+    thumbAttempted.add(`${m.id}:${version}`);
+    try {
+      const url = await cloud.downloadThumbnail(m);
+      if (!url) return false;
+      await local.cacheThumbnail(m.id, url, version);
+      return true;
+    } catch { return false; }
+  }
+
+  /** Fetches in the background with limited concurrency, then signals the page once. */
+  function fillThumbs(todo: CloudProjectMeta[]) {
+    if (thumbFill) return;
+    thumbFill = (async () => {
+      const queue = [...todo];
+      let got = 0;
+      const worker = async () => {
+        for (let m = queue.shift(); m; m = queue.shift()) if (await fetchThumb(m)) got++;
+      };
+      await Promise.all(Array.from({ length: Math.min(THUMB_FETCH_CONCURRENCY, queue.length) }, worker));
+      if (got > 0) thumbsUpdated.update(n => n + 1);
+    })().finally(() => { thumbFill = null; });
+  }
+
   const forget = (id: string) => {
+    cloudMetas.delete(id);
     status.update(({ [id]: _s, ...rest }) => rest);
     cloudInfo.update(({ [id]: _c, ...rest }) => rest);
   };
@@ -126,6 +165,7 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     if (cancelled()) return;
     await local.adopt(id, raw);
     await deps.meta.write(id, { knownRev: cm.rev, pendingBaseRev: null });
+    if (cm.thumbPath) void fetchThumb(cm).then(ok => { if (ok) thumbsUpdated.update(n => n + 1); });
     conflicted.delete(id);
     failures.delete(id);
     unschedule(id);
@@ -277,6 +317,25 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     ...local,
     syncStatus: { subscribe: status.subscribe },
     cloudMeta: { subscribe: cloudInfo.subscribe },
+    thumbnailsUpdated: { subscribe: thumbsUpdated.subscribe },
+
+    async getThumbnails() {
+      const thumbs = await local.getThumbnails();
+      if (!cloud || !deps.user()) return thumbs;
+      const todo: CloudProjectMeta[] = [];
+      for (const m of cloudMetas.values()) {
+        if (!m.thumbPath || thumbAttempted.has(`${m.id}:${thumbVersion(m)}`)) continue;
+        if (thumbs[m.id]) {
+          // A local preview is only replaced when it is a cached cloud one and the cloud has moved on.
+          let cached: string | null = null;
+          try { cached = await local.getCachedThumbnailVersion(m.id); } catch { /* treat as local */ }
+          if (cached === null || cached === thumbVersion(m)) continue;
+        }
+        todo.push(m);
+      }
+      if (todo.length) fillThumbs(todo);
+      return thumbs;
+    },
     flush,
 
     watch(id, cb) {
@@ -449,6 +508,12 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       const project = await local.load(id);
       if (!project) throw new Error('Project not found');
       const created = await cloud.createProject(project);
+      // Best effort: other devices have nothing to show for this project until its preview is in the cloud.
+      try {
+        const thumb = await local.getThumbnail(id);
+        const blob = thumb ? jpegBlobFromDataUrl(thumb) : null;
+        if (blob) await cloud.uploadThumbnail(id, blob);
+      } catch { /* optional */ }
       await deps.meta.write(id, { knownRev: 0, pendingBaseRev: null });
       // Fill cloudMeta now so the library offers Share… without waiting for the next list.
       if (created?.id) noteCloud(created);

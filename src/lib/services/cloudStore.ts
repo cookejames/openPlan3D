@@ -288,6 +288,19 @@ export function createCloudStore(deps: CloudStoreDeps) {
       await updateDoc(projectDoc(id), { thumbPath: path });
     },
 
+    /** The cloud thumbnail as a JPEG data URL, or null when there is none or it cannot be read. */
+    async downloadThumbnail(meta: CloudProjectMeta): Promise<string | null> {
+      if (!meta.thumbPath) return null;
+      try {
+        const bytes = new Uint8Array(await getBytes(ref(storage, meta.thumbPath)));
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return `data:image/jpeg;base64,${btoa(binary)}`;
+      } catch {
+        return null;
+      }
+    },
+
     watchProject(id: string, cb: (meta: CloudProjectMeta | null) => void): () => void {
       me();
       return onSnapshot(projectDoc(id), (snap) => cb(snap.exists() ? toMeta(snap.id, snap.data()) : null));

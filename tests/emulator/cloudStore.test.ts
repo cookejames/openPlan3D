@@ -177,6 +177,16 @@ describe('cloudStore (emulator)', () => {
     expect((await alice.store.readMeta('p8'))!.thumbPath).toBe('projects/p8/thumb.jpg');
   });
 
+  it('downloadThumbnail round-trips uploadThumbnail and is null when absent', async () => {
+    await alice.store.createProject(makeProject('p8b'));
+    const absent = (await alice.store.readMeta('p8b'))!;
+    expect(await alice.store.downloadThumbnail(absent)).toBeNull();
+    await alice.store.uploadThumbnail('p8b', new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: 'image/jpeg' }));
+    const meta = (await alice.store.readMeta('p8b'))!;
+    expect(await alice.store.downloadThumbnail(meta)).toBe('data:image/jpeg;base64,/9j/4A==');
+    expect(await alice.store.downloadThumbnail({ ...meta, thumbPath: 'projects/p8b/missing.jpg' })).toBeNull();
+  });
+
   it('watchProject reports changes and deletion', async () => {
     await alice.store.createProject(makeProject('p9'));
     const seen: Array<number | null> = [];

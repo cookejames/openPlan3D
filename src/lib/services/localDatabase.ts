@@ -237,3 +237,17 @@ export function notifyLibraryChange(id: string) {
   // on notifications or localStorage quota; focus and saves recheck the database.
   try { localStorage.setItem(LIBRARY_CHANGE_KEY, JSON.stringify({ id, nonce: crypto.randomUUID() })); } catch {}
 }
+
+export const thumbCacheKey = (id: string) => `thumb-cache:${id}`;
+
+/** Writes a thumbnail cache entry (and the cloud version it came from) without any opened-revision check. */
+export function writeCachedThumbnail(id: string, dataUrl: string, version: string): Promise<void> {
+  return withDatabase(db => transaction(db, ['thumbnails', 'meta'], 'readwrite', async tx => {
+    tx.objectStore('thumbnails').put(dataUrl, id);
+    tx.objectStore('meta').put(version, thumbCacheKey(id));
+  }));
+}
+
+export function readCachedThumbnailVersion(id: string): Promise<string | null> {
+  return readRecord('meta', thumbCacheKey(id));
+}

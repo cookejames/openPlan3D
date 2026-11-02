@@ -141,6 +141,12 @@
       promptDismissed = uid !== null && readPromptDismissed(uid);
       if (!first) void withLibraryError(refreshProjects);
     });
+    // Cloud thumbnails arrive after the list renders; re-read them when the store has cached some.
+    let thumbsSeen = true;
+    const unsubscribeThumbs = projectStore.thumbnailsUpdated.subscribe(() => {
+      if (thumbsSeen) { thumbsSeen = false; return; }
+      void projectStore.getThumbnails().then(next => { thumbnails = next; });
+    });
     void withLibraryError(async () => {
       await refreshProjects();
       const seen = localStorage.getItem('hasSeenWelcome');
@@ -148,7 +154,7 @@
         showWelcome = true;
       }
     });
-    return unsubscribeAuth;
+    return () => { unsubscribeAuth(); unsubscribeThumbs(); };
   });
 
   async function createProject(create: () => unknown) {
