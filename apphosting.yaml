@@ -36,32 +36,32 @@ env:
       - BUILD
   # Fill these from the Firebase console (Project settings > Your apps). They are public web config, not secrets.
   - variable: PUBLIC_FIREBASE_API_KEY
-    value: ""
+    value: AIzaSyD1GdvoXM9TpNmXN1mL8TE1Q4T8uAXHy1Q
     availability:
       - BUILD
       - RUNTIME
   - variable: PUBLIC_FIREBASE_AUTH_DOMAIN
-    value: ""
+    value: openplan3d-db739.firebaseapp.com
     availability:
       - BUILD
       - RUNTIME
   - variable: PUBLIC_FIREBASE_PROJECT_ID
-    value: ""
+    value: openplan3d-db739
     availability:
       - BUILD
       - RUNTIME
   - variable: PUBLIC_FIREBASE_STORAGE_BUCKET
-    value: ""
+    value: openplan3d-db739.firebasestorage.app
     availability:
       - BUILD
       - RUNTIME
   - variable: PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-    value: ""
+    value: "31650172995"
     availability:
       - BUILD
       - RUNTIME
   - variable: PUBLIC_FIREBASE_APP_ID
-    value: ""
+    value: "1:31650172995:web:fc569966fb8d68e28084f6"
     availability:
       - BUILD
       - RUNTIME
