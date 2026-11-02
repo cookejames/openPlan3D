@@ -17,6 +17,7 @@
   import LibraryStorageNote from '$lib/components/LibraryStorageNote.svelte';
   import AccountButton from '$lib/components/AccountButton.svelte';
   import ProjectActionsMenu from '$lib/components/ProjectActionsMenu.svelte';
+  import ShareDialog from '$lib/components/ShareDialog.svelte';
   import SyncBadge from '$lib/components/SyncBadge.svelte';
   import { houseTemplates } from '$lib/utils/houseTemplates';
 
@@ -45,6 +46,8 @@
 
   // Cloud sync: badges, uploads and the one-time upload prompt. Only shown while signed in.
   const syncStatus = projectStore.syncStatus;
+  const cloudMeta = projectStore.cloudMeta;
+  let shareTarget = $state<{ id: string; name: string } | null>(null);
   const signedIn = $derived($authState.status === 'signedIn');
   const localProjects = $derived(signedIn ? projects.filter(project => $syncStatus[project.id] === 'local') : []);
   let syncUid = $state<string | null>(null);
@@ -365,10 +368,12 @@
 
             <ProjectActionsMenu name={project.name} disabled={duplicating}
               uploadable={signedIn && $syncStatus[project.id] === 'local'} uploadBusy={uploadBusy}
+              shareable={signedIn && $syncStatus[project.id] !== 'local' && !!$cloudMeta[project.id]}
               onaction={(action) => {
                 if (action === 'open') goto(`${base}/editor?id=${encodeURIComponent(project.id)}`);
                 else if (action === 'duplicate') void duplicateProject(project.id);
                 else if (action === 'upload') void uploadOne(project);
+                else if (action === 'share') shareTarget = { id: project.id, name: project.name };
                 else openAction(action, project);
               }} />
           </div>
@@ -376,6 +381,10 @@
       </div>
     {/if}
   </div>
+
+  {#if shareTarget && signedIn}
+    <ShareDialog id={shareTarget.id} name={shareTarget.name} onclose={() => shareTarget = null} />
+  {/if}
 
   {#if actionDialog}
     <dialog use:modalDialog aria-labelledby="library-action-title" aria-describedby="library-action-description"

@@ -2,14 +2,16 @@
   import { t } from '$lib/i18n';
   import { tick } from 'svelte';
 
-  type MenuAction = 'open' | 'rename' | 'duplicate' | 'upload' | 'delete';
-  let { name, disabled = false, uploadable = false, uploadBusy = false, onaction }: {
+  type MenuAction = 'open' | 'rename' | 'duplicate' | 'upload' | 'share' | 'delete';
+  let { name, disabled = false, uploadable = false, uploadBusy = false, shareable = false, onaction }: {
     name: string;
     disabled?: boolean;
     /** Adds Upload to cloud for local-only projects while signed in. */
     uploadable?: boolean;
     /** An upload is running somewhere in the library: the upload item shows as busy and cannot be chosen. */
     uploadBusy?: boolean;
+    /** Adds Share… for cloud-tracked projects while signed in. */
+    shareable?: boolean;
     onaction: (action: MenuAction) => void;
   } = $props();
   const id = $props.id();
@@ -18,7 +20,9 @@
   let menu = $state<HTMLDivElement>();
   const actions = $derived((uploadable
     ? ['open', 'rename', 'duplicate', 'upload', 'delete']
-    : ['open', 'rename', 'duplicate', 'delete']) as MenuAction[]);
+    : shareable
+      ? ['open', 'rename', 'duplicate', 'share', 'delete']
+      : ['open', 'rename', 'duplicate', 'delete']) as MenuAction[]);
 
   function close(restore = false) {
     open = false;
@@ -81,7 +85,7 @@
         disabled={action === 'upload' && uploadBusy}
         onclick={() => { close(true); onaction(action); }}
         class="w-full px-3 py-2 text-sm text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-40 {action === 'delete' ? 'text-red-500 hover:bg-red-50 focus:bg-red-50' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}">
-        {action === 'upload' ? $t(uploadBusy ? 'library.sync.uploading' : 'library.sync.upload') : $t(`library.${action}`)}
+        {action === 'upload' ? $t(uploadBusy ? 'library.sync.uploading' : 'library.sync.upload') : action === 'share' ? $t('share.menu') : $t(`library.${action}`)}
       </button>
     {/each}
   </div>
