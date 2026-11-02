@@ -12,7 +12,8 @@
   import { currentProject, viewMode, selectedElementId, selectedRoomId, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import { USER_GUIDE_URL } from '$lib/stores/exportNotice';
   import { interchangeProjectName } from '$lib/utils/interchange';
-  import { localStore, storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { projectStore } from '$lib/services/projectStore';
   import { autoSave, markClean, saveState } from '$lib/stores/saveStatus';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
@@ -153,7 +154,7 @@
         // A new/imported project may exist only in memory if its first save failed.
         const pending = get(currentProject);
         if (pending?.id === id && get(saveState) !== 'saved') { ready = true; return; }
-        const project = await localStore.load(id);
+        const project = await projectStore.load(id);
         if (project) {
           loadProject(project);
           markClean();

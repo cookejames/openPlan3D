@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '$lib': fileURLToPath(new URL('./src/lib', import.meta.url)),
+      '$env/dynamic/public': fileURLToPath(new URL('./tests/fixtures/env-dynamic-public.ts', import.meta.url)),
       '$app/paths': fileURLToPath(new URL('./tests/fixtures/app-paths.ts', import.meta.url)),
     },
   },
