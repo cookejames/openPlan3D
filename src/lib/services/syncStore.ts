@@ -1,13 +1,23 @@
-import { writable, type Readable } from 'svelte/store';
+import { get, writable, type Readable } from 'svelte/store';
+import { readProject } from '$lib/utils/projectValidation';
 import type { Project } from '$lib/models/types';
-import type { CloudStore } from './cloudStore';
+import type { CloudProjectMeta, CloudStore } from './cloudStore';
 import { ProjectConflictError, type DataStore, type LocalDataStore } from './datastore';
 import { readRecord, type CloudSyncMeta } from './localDatabase';
 
-export type SyncStatus = 'local' | 'synced' | 'syncing' | 'offline' | 'conflict' | 'error';
+export type SyncStatus = 'local' | 'synced' | 'syncing' | 'offline' | 'conflict' | 'error' | 'cloud';
+// 'cloud' = in the cloud, not yet in this browser.
+
+export type CloudMetaInfo = { ownerUid: string; isOwner: boolean; updatedBy: string };
 
 export interface SyncStore extends DataStore {
   syncStatus: Readable<Record<string, SyncStatus>>;
+  /** Ownership info for cloud projects seen by list/load, for the library UI. */
+  cloudMeta: Readable<Record<string, CloudMetaInfo>>;
+  /** Discard local pending edits and take the cloud's latest revision. */
+  loadLatest(id: string): Promise<Project>;
+  /** Save the local version as a new local-only copy, then take the cloud's latest for the original. Returns the copy. */
+  keepMineAsCopy(id: string): Promise<Project>;
   flush(id?: string): Promise<void>;
   uploadToCloud(id: string): Promise<void>;
   /** Clear timers and listeners. */
@@ -30,11 +40,14 @@ export interface SyncStoreDeps {
   };
   /** Raw stored bytes of a project. Reads IndexedDB directly: DataStore.load would invalidate the editor's queued saves. */
   readLocal?: (id: string) => Promise<string | null>;
+  /** Max time cloud work may delay opening or listing a project. Default 8000. */
+  cloudTimeoutMs?: number;
 }
 
 const PUSH_DELAY = 5_000;
 const RETRY_DELAYS = [5_000, 15_000, 60_000, 300_000];
 const KEEP_REVS = 10;
+const CLOUD_TIMEOUT = 8_000;
 
 export function createSyncStore(deps: SyncStoreDeps): SyncStore {
   const { local, cloud } = deps;
@@ -44,6 +57,43 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
 
   const status = writable<Record<string, SyncStatus>>({});
   const setStatus = (id: string, value: SyncStatus) => status.update(all => (all[id] === value ? all : { ...all, [id]: value }));
+
+  const cloudInfo = writable<Record<string, CloudMetaInfo>>({});
+  const noteCloud = (m: CloudProjectMeta) => {
+    const info = { ownerUid: m.ownerUid, isOwner: m.ownerUid === deps.user()?.uid, updatedBy: m.updatedBy };
+    cloudInfo.update(all => ({ ...all, [m.id]: info }));
+  };
+  const forget = (id: string) => {
+    status.update(({ [id]: _s, ...rest }) => rest);
+    cloudInfo.update(({ [id]: _c, ...rest }) => rest);
+  };
+  const offlineOrError = (): SyncStatus => (typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
+
+  /** Rejects after the timeout. `cancelled()` lets the work skip side effects once the caller has moved on. */
+  function withTimeout<T>(work: (cancelled: () => boolean) => Promise<T>): Promise<T> {
+    let done = false;
+    return new Promise<T>((resolve, reject) => {
+      const handle = setTimer(() => { done = true; reject(new Error('Cloud request timed out')); }, deps.cloudTimeoutMs ?? CLOUD_TIMEOUT);
+      work(() => done).then(
+        v => { if (!done) { done = true; clearTimer(handle); resolve(v); } },
+        e => { if (!done) { done = true; clearTimer(handle); reject(e); } },
+      );
+    });
+  }
+
+  /** Download, validate and adopt the cloud's latest revision, then record it as the known revision. */
+  async function pullLatest(id: string, cm: CloudProjectMeta, cancelled: () => boolean = () => false) {
+    const raw = await cloud!.downloadLatest(cm);
+    const incoming = readProject(JSON.parse(raw));
+    if (incoming.id !== id) throw new Error('The cloud project ID does not match.');
+    if (cancelled()) return;
+    await local.adopt(id, raw);
+    await deps.meta.write(id, { knownRev: cm.rev, pendingBaseRev: null });
+    conflicted.delete(id);
+    failures.delete(id);
+    unschedule(id);
+    setStatus(id, 'synced');
+  }
 
   const timers = new Map<string, unknown>();
   const inFlight = new Map<string, Promise<void>>();
@@ -127,10 +177,123 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
     await Promise.all([...new Set([...timers.keys(), ...inFlight.keys()])].map(push));
   }
 
+  async function loadLatest(id: string): Promise<Project> {
+    if (!cloud || !deps.user()) throw new Error('Sign in to sync projects');
+    const cm = await cloud.readMeta(id);
+    if (!cm) throw new Error('This project is no longer available in the cloud');
+    noteCloud(cm);
+    await pullLatest(id, cm);
+    const project = await local.load(id);
+    if (!project) throw new Error('Project not found');
+    return project;
+  }
+
   return {
     ...local,
     syncStatus: { subscribe: status.subscribe },
+    cloudMeta: { subscribe: cloudInfo.subscribe },
     flush,
+
+    async load(id) {
+      if (!cloud || !deps.user()) return local.load(id);
+      let meta: CloudSyncMeta | null;
+      try { meta = await deps.meta.read(id); } catch { return local.load(id); }
+      const tracked = !!meta && meta.knownRev !== null;
+      try {
+        await withTimeout(async cancelled => {
+          const cm = await cloud.readMeta(id);
+          if (cancelled()) return;
+          if (!cm) {
+            if (tracked) {
+              // Deleted by the owner or unshared: keep the local copy, it becomes local-only.
+              await deps.meta.remove(id);
+              unschedule(id);
+              conflicted.delete(id);
+              setStatus(id, 'local');
+            }
+            return;
+          }
+          noteCloud(cm);
+          const hasLocal = (await readLocal(id)) !== null;
+          if (cancelled()) return;
+          if (!hasLocal) { await pullLatest(id, cm, cancelled); return; }
+          // Local copy with no sync record: never overwrite it with the cloud copy.
+          if (!tracked) return;
+          const known = meta!.knownRev!, pending = meta!.pendingBaseRev !== null;
+          if (cm.rev > known) {
+            if (!pending) { await pullLatest(id, cm, cancelled); return; }
+            conflicted.add(id);
+            unschedule(id);
+            setStatus(id, 'conflict');
+            return;
+          }
+          if (conflicted.has(id)) { setStatus(id, 'conflict'); return; }
+          if (pending) { setStatus(id, 'syncing'); schedule(id, PUSH_DELAY); }
+          else setStatus(id, 'synced');
+        });
+      } catch {
+        setStatus(id, offlineOrError());
+      }
+      return local.load(id);
+    },
+
+    async list() {
+      const rows = await local.list();
+      if (!cloud || !deps.user()) return rows;
+      let remote: CloudProjectMeta[];
+      try { remote = await withTimeout(() => cloud.listProjects()); } catch { return rows; }
+      for (const m of remote) noteCloud(m);
+      const remoteIds = new Set(remote.map(m => m.id));
+      const result = [...rows];
+      const have = new Set(rows.map(r => r.id));
+      const current = get(status);
+      for (const row of rows) {
+        let meta: CloudSyncMeta | null = null;
+        try { meta = await deps.meta.read(row.id); } catch { /* leave status alone */ continue; }
+        if (!meta || meta.knownRev === null) { setStatus(row.id, 'local'); continue; }
+        const existing = current[row.id];
+        if (remoteIds.has(row.id) && !(existing === 'syncing' || existing === 'conflict' || existing === 'offline' || existing === 'error')) {
+          setStatus(row.id, meta.pendingBaseRev !== null ? 'syncing' : 'synced');
+        }
+      }
+      for (const m of remote) {
+        if (have.has(m.id)) continue;
+        result.push({ id: m.id, name: m.name, updatedAt: (m.updatedAt ?? new Date(0)).toISOString() });
+        setStatus(m.id, 'cloud');
+      }
+      return result;
+    },
+
+    async delete(id) {
+      if (!cloud || !deps.user()) return local.delete(id);
+      const meta = await deps.meta.read(id);
+      const tracked = !!meta && meta.knownRev !== null;
+      let info = get(cloudInfo)[id];
+      if (!info && tracked) {
+        const cm = await cloud.readMeta(id);
+        if (cm) { noteCloud(cm); info = get(cloudInfo)[id]; }
+      }
+      // Owner: remove from the cloud first; if that fails, nothing local is touched.
+      if (info?.isOwner) await cloud.deleteProject(id);
+      if ((await readLocal(id)) !== null) await local.delete(id);
+      if (tracked) await deps.meta.remove(id);
+      unschedule(id);
+      conflicted.delete(id);
+      failures.delete(id);
+      // A non-owner only removes their local copy; the project is still shared with them, so the next
+      // list() shows it again as a cloud row. That is expected.
+      forget(id);
+    },
+
+    loadLatest,
+
+    async keepMineAsCopy(id) {
+      const mine = await local.load(id);
+      if (!mine) throw new Error('Project not found');
+      const copy = await local.saveCopy(mine, 'My version');
+      await loadLatest(id);
+      return copy;
+    },
 
     async save(project) {
       await local.save(project);
