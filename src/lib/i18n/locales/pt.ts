@@ -107,6 +107,8 @@ export const pt = {
   "welcome.importPlanDesc": "Carregar um arquivo JSON ou RoomPlan",
   "welcome.quickTour": "Tour Rápido",
   "welcome.quickTourDesc": "Aprenda o básico em 30 segundos",
+  "welcome.signIn": "Entrar",
+  "welcome.signInDesc": "Abra projetos salvos na nuvem nos seus outros dispositivos",
   "welcome.unrecognizedFormat": "Formato de arquivo não reconhecido",
   "welcome.failedToParse": "Falha ao processar o arquivo",
   "welcome.restore": "Restaurar backup da biblioteca",

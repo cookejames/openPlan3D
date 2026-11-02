@@ -107,6 +107,8 @@ export const en = {
   "welcome.importPlanDesc": "Load a JSON or RoomPlan file",
   "welcome.quickTour": "Quick Tour",
   "welcome.quickTourDesc": "Learn the basics in 30 seconds",
+  "welcome.signIn": "Sign in",
+  "welcome.signInDesc": "Open projects saved in the cloud on your other devices",
   "welcome.unrecognizedFormat": "Unrecognized file format",
   "welcome.failedToParse": "Failed to parse file",
   "welcome.restore": "Restore a library backup",
