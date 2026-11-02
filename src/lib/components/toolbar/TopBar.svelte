@@ -30,6 +30,7 @@
   import { saveState, saveError, lastSavedAt, manualSave, autoSave, initAutoSave } from '$lib/stores/saveStatus';
   import { initVersionHistory, stopVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
   import VersionHistoryPanel from './VersionHistoryPanel.svelte';
+  import AccountButton from '$lib/components/AccountButton.svelte';
 
   const openingLifetime = new AbortController();
   onDestroy(() => openingLifetime.abort());
@@ -691,6 +692,7 @@
   <button onclick={save} class="px-3 py-1.5 max-xl:px-2.5 text-sm bg-white text-slate-800 font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
     {$t('saveControls.save')}
   </button>
+  <AccountButton variant="toolbar" />
 </div>
 
 {#if $saveError}

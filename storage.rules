@@ -1,22 +1,32 @@
 rules_version = '2';
-
-// Firebase Storage rules for capture handoffs (inbox/{CODE}.json, CODE = [A-Z2-9]{8},
-// an alphabet without I, O, 0 or 1). Captures are written only by the web backend's
-// service identity through IAM, after POST /api/handoffs has reserved quota (see
-// docs/handoff-quotas.md); these rules do not apply to it. Public clients can read a
-// capture by its code, which is how /editor?import=CODE fetches it, and can write
-// nothing: no direct uploads that bypass admission, and no access to its ledger.
-// A bucket lifecycle rule deletes inbox/ objects after one day.
+// Storage: plan revisions live under projects/{pid}/, readable and writable only by the project's
+// verified editors (checked against Firestore `editorEmails`). Share snapshots live under
+// shared/{token}.json: public read-only, with the unguessable 32-hex token as the secret, and
+// writable only by editors of the share's project.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /inbox/{file} {
-      allow read: if file.matches('[A-Z2-9]{8}\\.json');
-      allow write: if false;
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function isEditor(pid) {
+      return signedIn() && request.auth.token.email.lower() in
+        firestore.get(/databases/(default)/documents/projects/$(pid)).data.editorEmails;
+    }
+    function sizeOk() {
+      return request.resource == null || request.resource.size < 96 * 1024 * 1024;
     }
 
-    // Everything else, including the quota ledger and assistant shares: denied.
-    match /{allPaths=**} {
-      allow read, write: if false;
+    match /projects/{pid}/{path=**} {
+      allow read: if isEditor(pid);
+      allow write: if isEditor(pid) && sizeOk();
+    }
+
+    match /shared/{file} {
+      allow get: if true;            // the unguessable token is the secret
+      allow list: if false;
+      allow write: if file.matches('[a-f0-9]{32}\\.json')
+        && isEditor(firestore.get(/databases/(default)/documents/shares/$(file.split('\\.')[0])).data.projectId)
+        && sizeOk();
     }
   }
 }

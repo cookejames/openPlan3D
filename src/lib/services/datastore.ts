@@ -1,6 +1,6 @@
 import { readProject } from '$lib/utils/projectValidation';
 import type { Project } from '$lib/models/types';
-import { withDatabase, transaction, request, records, readRecord, libraryBackup, notifyLibraryChange } from './localDatabase';
+import { withDatabase, transaction, request, records, readRecord, libraryBackup, notifyLibraryChange, syncMetaKey } from './localDatabase';
 import { requestPersistentStorage } from './storagePersistence';
 export { PROJECTS_STORAGE_KEY, LIBRARY_CHANGE_KEY } from './localDatabase';
 
@@ -16,6 +16,11 @@ export interface DataStore {
   saveThumbnail(id: string, dataUrl: string): Promise<void>;
   getThumbnail(id: string): Promise<string | null>;
   getThumbnails(): Promise<Record<string, string>>;
+}
+
+export interface LocalDataStore extends DataStore {
+  /** Record raw bytes written by sync as the revision this tab has open, so saving them does not conflict. */
+  adopt(id: string, raw: string): Promise<void>;
 }
 
 
@@ -66,7 +71,7 @@ export async function downloadLibraryBackup() {
 }
 
 /** Each browser document remembers only revisions it actually opened or saved. */
-export function createLocalStore(): DataStore {
+export function createLocalStore(): LocalDataStore {
   const opened = new Map<string, string | null>();
   const listed = new Map<string, string>();
   const generations = new Map<string, number>();
@@ -94,6 +99,16 @@ export function createLocalStore(): DataStore {
       });
       // Committed work can now ask the browser to keep the library; the save never waits.
       void requestPersistentStorage();
+    },
+
+    async adopt(id, raw) {
+      await mutateLibrary(async () => {
+        await withDatabase(db => transaction(db, ['projects'], 'readwrite', async tx => {
+          tx.objectStore('projects').put(raw, id);
+        }));
+        opened.set(id, raw);
+        notifyLibraryChange(id);
+      });
     },
 
     async saveCopy(project, suffix = 'Recovered copy') {
@@ -148,13 +163,14 @@ export function createLocalStore(): DataStore {
 
     async delete(id) {
       await mutateLibrary(async () => {
-        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history'], 'readwrite', async tx => {
+        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history', 'meta'], 'readwrite', async tx => {
           const projects = tx.objectStore('projects');
           const expected = listed.has(id) ? listed.get(id) : opened.get(id);
           if (((await request(projects.get(id))) ?? null) !== (expected ?? null)) throw new ProjectConflictError();
           projects.delete(id);
           tx.objectStore('thumbnails').delete(id);
           tx.objectStore('history').delete(id);
+          tx.objectStore('meta').delete(syncMetaKey(id));
         }));
         // Retain the opened revision so this editor cannot recreate a deleted plan.
         listed.delete(id);

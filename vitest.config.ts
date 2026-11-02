@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { catalogAssets } from './tooling/catalog-assets.mjs';
 
 export default defineConfig({
@@ -14,6 +14,8 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['tests/fixtures/indexeddb.ts'],
     include: ['tests/**/*.test.ts'],
+    // Rules tests need the Firebase emulators; run them via `npm run test:rules`.
+    exclude: [...configDefaults.exclude, 'tests/rules/**'],
     restoreMocks: true,
     unstubGlobals: true,
   },

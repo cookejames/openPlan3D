@@ -201,6 +201,37 @@ export async function libraryBackup(): Promise<string> {
   } finally { db.close(); }
 }
 
+export interface CloudSyncMeta { knownRev: number | null; pendingBaseRev: number | null }
+
+export function syncMetaKey(id: string) {
+  return `cloud-sync:${id}`;
+}
+
+export async function readSyncMeta(id: string): Promise<CloudSyncMeta | null> {
+  const raw = await readRecord('meta', syncMetaKey(id));
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw);
+    const rev = (v: unknown) => v === null || Number.isFinite(v);
+    if (!value || typeof value !== 'object' || !rev(value.knownRev) || !rev(value.pendingBaseRev)) return null;
+    return { knownRev: value.knownRev, pendingBaseRev: value.pendingBaseRev };
+  } catch {
+    return null;
+  }
+}
+
+export function writeSyncMeta(id: string, meta: CloudSyncMeta): Promise<void> {
+  return withDatabase(db => transaction(db, ['meta'], 'readwrite', async tx => {
+    tx.objectStore('meta').put(JSON.stringify(meta), syncMetaKey(id));
+  }));
+}
+
+export function deleteSyncMeta(id: string): Promise<void> {
+  return withDatabase(db => transaction(db, ['meta'], 'readwrite', async tx => {
+    tx.objectStore('meta').delete(syncMetaKey(id));
+  }));
+}
+
 export function notifyLibraryChange(id: string) {
   // A tiny optional signal, never project data. Commit correctness does not depend
   // on notifications or localStorage quota; focus and saves recheck the database.
