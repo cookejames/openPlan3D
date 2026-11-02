@@ -448,8 +448,10 @@ export function createSyncStore(deps: SyncStoreDeps): SyncStore {
       if (!cloud || !deps.user()) throw new Error('Sign in to sync projects');
       const project = await local.load(id);
       if (!project) throw new Error('Project not found');
-      await cloud.createProject(project);
+      const created = await cloud.createProject(project);
       await deps.meta.write(id, { knownRev: 0, pendingBaseRev: null });
+      // Fill cloudMeta now so the library offers Share… without waiting for the next list.
+      if (created?.id) noteCloud(created);
       setStatus(id, 'synced');
     },
 

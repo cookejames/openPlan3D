@@ -19,6 +19,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:browser": "playwright test",
+		"test:e2e:cloud": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"playwright test --config playwright.cloud.config.ts\"",
 		"test:watch": "vitest",
 		"test:emulator": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"vitest run --config vitest.emulator.config.ts\"",
 		"benchmark:viewer": "playwright test --config=playwright.benchmark.config.ts",

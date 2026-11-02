@@ -1,8 +1,8 @@
 import { env } from '$env/dynamic/public';
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { browserLocalPersistence, initializeAuth, type Auth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, type Firestore } from 'firebase/firestore';
-import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { browserLocalPersistence, connectAuthEmulator, GoogleAuthProvider, initializeAuth, signInWithCredential, type Auth } from 'firebase/auth';
+import { connectFirestoreEmulator, initializeFirestore, memoryLocalCache, persistentLocalCache, type Firestore } from 'firebase/firestore';
+import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
 
 const firebaseConfig = {
@@ -26,15 +26,32 @@ const isBrowser = typeof window !== 'undefined';
 export const app: FirebaseApp | null =
   firebaseEnabled && isBrowser ? initializeApp(firebaseConfig) : null;
 
+// Dev/test only: point the SDKs at the local Firebase emulators (see `npm run test:e2e:cloud`).
+export const useEmulators = env.PUBLIC_FIREBASE_USE_EMULATORS === 'true';
+
 export const auth: Auth | null = app
   ? initializeAuth(app, { persistence: browserLocalPersistence })
   : null;
 
 export const db: Firestore | null = app
-  ? initializeFirestore(app, { localCache: persistentLocalCache() })
+  ? initializeFirestore(app, { localCache: useEmulators ? memoryLocalCache() : persistentLocalCache() })
   : null;
 
 export const storage: FirebaseStorage | null = app ? getStorage(app) : null;
+
+if (useEmulators && auth && db && storage) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
+
+  // Test-only sign-in without the Google popup: window.__o3dTestSignIn(email) signs in a verified
+  // account on the Auth emulator. It exists only when PUBLIC_FIREBASE_USE_EMULATORS=true, which is
+  // never set for a real deployment (and the emulator rejects nothing a real project would accept).
+  (window as unknown as { __o3dTestSignIn?: (email: string) => Promise<void> }).__o3dTestSignIn = async (email) => {
+    const idToken = JSON.stringify({ sub: email, email, email_verified: true });
+    await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+  };
+}
 
 // Analytics needs a measurement id and a browser that supports it.
 export const analytics: Promise<Analytics | null> =
