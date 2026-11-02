@@ -9,6 +9,13 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "apphosting": [
+    {
+      "backendId": "openplan3d",
+      "rootDir": "/",
+      "ignore": ["node_modules", ".git", ".env", "build", ".svelte-kit", "test-results", "playwright-report", "*-debug.log"]
+    }
+  ],
   "emulators": {
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },
