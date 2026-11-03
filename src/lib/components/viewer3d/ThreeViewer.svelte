@@ -37,6 +37,7 @@
   import { applyWallXray } from '$lib/utils/wallXray';
   import { disposeModel } from '$lib/utils/furnitureModelResources';
   import { ownColorCanvasTexture, refreshBackgroundTexture } from '$lib/utils/viewerTextures';
+  import { viewerPixelRatio } from '$lib/utils/viewerPixelRatio';
   import { createFurnitureModelWithGLB, createPlacedFurnitureModel } from '$lib/utils/furnitureModelLoader';
   import { addFurniture } from '$lib/stores/project';
   import { detectRooms, resolveRoomGeometry, getRoomPolygon, roomCentroid, roomLabelPosition } from '$lib/utils/roomDetection';
@@ -780,8 +781,10 @@
       webglUnavailable = true;
       return false;
     }
+    renderer.setPixelRatio(viewerPixelRatio(window.devicePixelRatio));
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // three.js keeps the scene for a restored context (a mobile GPU reset, say); it only needs a frame.
+    renderer.domElement.addEventListener('webglcontextrestored', markSceneDirty);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -794,6 +797,8 @@
     controls.dampingFactor = 0.08;
     controls.target.set(0, 100, 0);
     controls.maxPolarAngle = Math.PI / 2.05;
+    // A pinch can dolly by an infinite factor; at radius 0 every later pinch would scale nothing.
+    controls.minDistance = 1;
     // Mark dirty when orbit controls move the camera
     controls.addEventListener('change', markSceneDirty);
 
@@ -1925,6 +1930,7 @@
     const h = container.clientHeight;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(viewerPixelRatio(window.devicePixelRatio));
     renderer.setSize(w, h);
     markSceneDirty();
   }
