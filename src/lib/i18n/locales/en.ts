@@ -212,6 +212,8 @@ export const en = {
   "editor.lock.tookOverSelf": "Another window or device of yours took over editing · View only",
   "editor.lock.finished": "{name} has finished editing.",
   "editor.lock.finishedSelf": "Your other window has finished editing.",
+  "editor.mobile.viewOnly": "View only on mobile. Editing works best on a larger screen.",
+  "editor.mobile.enableEditing": "Enable editing",
   "editor.lock.editAnyway": "Edit anyway",
   "editor.lock.editNow": "Edit now",
   "editor.lock.editAnywayHint": "They'll be switched to view only.",
