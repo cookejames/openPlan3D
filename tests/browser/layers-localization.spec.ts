@@ -34,12 +34,14 @@ for (const width of [1440, 390]) test(`Portuguese layers preserve visibility, se
       })).toBe(true);
       await control.click();
     }
-    for (const title of ['Alternar grade (G)', 'Alternar passo do ajuste: grade de 25 cm ou 10 cm (S)', 'Alternar móveis', 'Alternar réguas', 'Alternar minimapa']) {
+    const snapTitle = 'Alternar passo do ajuste: grade de 25 cm, 10 cm, 5 cm ou desativado (S)';
+    for (const title of ['Alternar grade (G)', snapTitle, 'Alternar móveis', 'Alternar réguas', 'Alternar minimapa']) {
       const toggle = page.getByTitle(title, { exact: true });
       const before = await toggle.getAttribute('aria-pressed');
       await clickStatusControl(toggle);
       await expect(toggle).toHaveAttribute('aria-pressed', before === 'true' ? 'false' : 'true');
-      await clickStatusControl(toggle);
+      // The snap step cycles through four steps back to the grid; the others toggle.
+      for (let i = title === snapTitle ? 3 : 1; i > 0; i--) await clickStatusControl(toggle);
       await expect(toggle).toHaveAttribute('aria-pressed', before!);
       if (title === 'Alternar grade (G)') {
         const path = testInfo.outputPath('phone-status-controls.png');

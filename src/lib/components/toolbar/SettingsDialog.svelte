@@ -70,6 +70,7 @@
     dimensionLineColor: '#1e293b',
     wallMeasureMode: 'centerline',
     snapToGrid: true,
+    snapStep: 'grid',
     snapToWalls: true,
     gridSize: 25,
   });

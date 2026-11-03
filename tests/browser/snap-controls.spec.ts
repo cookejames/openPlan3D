@@ -11,7 +11,8 @@ async function toggleSnapFromPalette(page: Page) {
 }
 
 /** The status-bar Snap button's title while Snap to Grid is off; it names the step S has picked. */
-const offTitle = (step: string) => `Snap to Grid is off in the top bar. S still picks the step used when it is on: 25 cm grid or 10 cm (now ${step})`;
+const offTitle = (step: string) => `Snap to Grid is off in the top bar. S still picks the step used when it is on: 25 cm grid, 10 cm, 5 cm or off (now ${step})`;
+const stepTitle = 'Switch snap step: 25 cm grid, 10 cm, 5 cm or off (S)';
 
 test('the top-bar Snap to Grid button shows the state the Command Palette set', async ({ page }) => {
   await page.goto('/editor');
@@ -43,14 +44,20 @@ test('the More actions Snap to Grid item shows the state the Command Palette set
   await expect(item).toHaveText('✓ Snap to Grid');
 });
 
-test('S and the status-bar Snap button switch the snap step and leave Snap to Grid alone', async ({ page }) => {
+test('S and the status-bar Snap button cycle 25 cm, 10 cm, 5 cm and off and leave Snap to Grid alone', async ({ page }) => {
   await page.goto('/editor');
   const snapping = page.getByRole('button', { name: 'Snap to Grid', exact: true });
-  const step = page.getByTitle('Switch snap step: 25 cm grid or 10 cm (S)', { exact: true });
+  const step = page.getByTitle(stepTitle, { exact: true });
   await expect(step).toHaveText('🧲 Snap 25 cm');
   await expect(step).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Save', exact: true }).press('s');
   await expect(step).toHaveText('🧲 Snap 10 cm');
+  await expect(step).toHaveAttribute('aria-pressed', 'false');
+  await expect(snapping).toHaveAttribute('aria-pressed', 'true');
+  await step.click();
+  await expect(step).toHaveText('🧲 Snap 5 cm');
+  await step.click();
+  await expect(step).toHaveText('🧲 Snap off');
   await expect(step).toHaveAttribute('aria-pressed', 'false');
   await expect(snapping).toHaveAttribute('aria-pressed', 'true');
   await step.click();
@@ -61,7 +68,7 @@ test('S and the status-bar Snap button switch the snap step and leave Snap to Gr
 test('the status-bar Snap button reads Snap off while Snap to Grid is off, and S still picks the step', async ({ page }) => {
   await page.goto('/editor');
   const snapping = page.getByRole('button', { name: 'Snap to Grid', exact: true });
-  const step = page.getByTitle('Switch snap step: 25 cm grid or 10 cm (S)', { exact: true });
+  const step = page.getByTitle(stepTitle, { exact: true });
   await expect(step).toHaveText('🧲 Snap 25 cm');
   await snapping.click();
   await expect(snapping).toHaveAttribute('aria-pressed', 'false');
@@ -81,8 +88,10 @@ test('the status-bar Snap button reads Snap off while Snap to Grid is off, and S
 test('the snap step reads in inches when the plan uses feet and inches', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('o3d_settings', JSON.stringify({ units: 'imperial' })));
   await page.goto('/editor');
-  const step = page.getByTitle('Switch snap step: 9.8" grid or 3.9" (S)', { exact: true });
+  const step = page.getByTitle('Switch snap step: 9.8" grid, 3.9", 2.0" or off (S)', { exact: true });
   await expect(step).toHaveText('🧲 Snap 9.8"');
   await page.getByRole('button', { name: 'Save', exact: true }).press('s');
   await expect(step).toHaveText('🧲 Snap 3.9"');
+  await page.getByRole('button', { name: 'Save', exact: true }).press('s');
+  await expect(step).toHaveText('🧲 Snap 2.0"');
 });

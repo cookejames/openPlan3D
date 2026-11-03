@@ -67,12 +67,14 @@ test('with site storage blocked the snap step, Settings, the Gemini key and cata
   await expect(page).toHaveURL(/\/editor\?id=/);
 
   // S and the status-bar Snap button switch the step although storage cannot keep it.
-  const step = page.getByTitle('Switch snap step: 25 cm grid or 10 cm (S)', { exact: true });
+  const step = page.getByTitle('Switch snap step: 25 cm grid, 10 cm, 5 cm or off (S)', { exact: true });
   await expect(step).toHaveText('🧲 Snap 25 cm');
   await page.getByRole('button', { name: 'Save', exact: true }).press('s');
   await expect(step).toHaveText('🧲 Snap 10 cm');
-  await step.click();
-  await expect(step).toHaveText('🧲 Snap 25 cm');
+  for (const label of ['🧲 Snap 5 cm', '🧲 Snap off', '🧲 Snap 25 cm']) {
+    await step.click();
+    await expect(step).toHaveText(label);
+  }
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -87,7 +89,7 @@ test('with site storage blocked the snap step, Settings, the Gemini key and cata
   await settings.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(settings.getByRole('alert')).toHaveText('Browser storage is unavailable. The key could not be removed.');
   await settings.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await expect(page.getByTitle('Switch snap step: 9.8" grid or 3.9" (S)', { exact: true })).toHaveText('🧲 Snap 9.8"');
+  await expect(page.getByTitle('Switch snap step: 9.8" grid, 3.9", 2.0" or off (S)', { exact: true })).toHaveText('🧲 Snap 9.8"');
 
   // Favorites and recent items last for the session.
   await page.getByRole('button', { name: 'Objects', exact: true }).click();
