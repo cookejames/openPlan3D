@@ -4,7 +4,7 @@ import {
   createEditLock, lockHolder, HEARTBEAT_MS, STALE_MS,
   type EditLockDeps, type EditLockState, type LockSource, type PresenceEntry,
 } from '$lib/stores/editLock';
-import { readOnly, readOnlyReason, setEditLockReadOnly } from '$lib/stores/readOnly';
+import { readOnly, readOnlyReason, setEditLockReadOnly, setMobileReadOnly } from '$lib/stores/readOnly';
 
 const ME = 'me-session';
 const src = (over: Partial<LockSource> = {}): LockSource => ({ user: { uid: 'u1' }, projectId: 'p1', cloudTracked: true, shareView: false, ...over });
@@ -41,8 +41,8 @@ async function open(h: ReturnType<typeof setup>, entries: PresenceEntry[], sourc
   await vi.advanceTimersByTimeAsync(0);
 }
 
-beforeEach(() => { vi.useFakeTimers(); setEditLockReadOnly(false); readOnly.set(false); });
-afterEach(() => { vi.useRealTimers(); setEditLockReadOnly(false); readOnly.set(false); });
+beforeEach(() => { vi.useFakeTimers(); setEditLockReadOnly(false); readOnly.set(false); setMobileReadOnly(false); });
+afterEach(() => { vi.useRealTimers(); setEditLockReadOnly(false); readOnly.set(false); setMobileReadOnly(false); });
 
 describe('lockHolder', () => {
   it('picks the latest claim, ties to the larger session id, ignores stale and viewers', () => {
@@ -224,6 +224,19 @@ describe('edit lock', () => {
     const none = createEditLock({ ...h.deps, presence: null });
     none.update(src());
     expect(none.isActive()).toBe(false);
+  });
+
+  it('does not take the lock while the mobile view-only default is on, and claims once it is lifted', async () => {
+    setMobileReadOnly(true);
+    const h = setup();
+    await open(h, [], src({ viewOnly: true }));
+    expect(h.presence.watchPresence).not.toHaveBeenCalled();
+    expect(h.calls).not.toContain('write:editing:true');
+    expect(get(readOnlyReason)).toBe('mobile');
+    setMobileReadOnly(false);
+    await open(h, [], src({ viewOnly: false }));
+    expect(h.calls).toContain('write:editing:true');
+    expect(get(readOnly)).toBe(false);
   });
 
   it('never touches share-view state', async () => {
