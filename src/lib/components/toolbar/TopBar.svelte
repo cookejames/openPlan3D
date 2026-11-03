@@ -721,7 +721,7 @@
     </span>
   </span>
   {/if}
-  {#if (!$readOnly || $readOnlyReason === 'lock') && syncLabelKey}
+  {#if (!$readOnly || ['lock', 'mobile'].includes($readOnlyReason ?? '')) && syncLabelKey}
     <span data-testid="sync-status" class="shrink-0 whitespace-nowrap text-[11px] font-medium max-xl:hidden {syncTone}">{$t(syncLabelKey)}</span>
   {/if}
   {#if !$readOnly}
@@ -729,7 +729,7 @@
     {$t('saveControls.save')}
   </button>
   {/if}
-  {#if !$readOnly || $readOnlyReason === 'lock'}
+  {#if !$readOnly || ['lock', 'mobile'].includes($readOnlyReason ?? '')}
   <AccountButton variant="toolbar" />
   {/if}
 </div>

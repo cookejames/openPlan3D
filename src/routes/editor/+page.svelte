@@ -16,7 +16,7 @@
   import { projectStore } from '$lib/services/projectStore';
   import { autoSave, markClean, saveState } from '$lib/stores/saveStatus';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
-  import { readOnly, readOnlyReason } from '$lib/stores/readOnly';
+  import { readOnly, readOnlyReason, initMobileReadOnly, enableMobileEditing } from '$lib/stores/readOnly';
   import { editLockState, editAnyway } from '$lib/stores/editLock';
   import { openSharedProject, leaveSharedView, saveSharedCopy } from '$lib/services/projectOpening';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
@@ -222,6 +222,7 @@
   }
 
   onMount(() => {
+    initMobileReadOnly();
     void initializeEditor();
     // Imports can replace the active project from either sidebar or toolbar.
     // Keep reloads pointed at that project once initial route loading is complete.
@@ -297,6 +298,12 @@
         <button class="font-semibold underline disabled:opacity-50" disabled={lk.busy} onclick={() => void editAnyway()}>
           {lk.busy ? $t('editor.lock.working') : lk.notice === 'finished' ? $t('editor.lock.editNow') : $t('editor.lock.editAnyway')}
         </button>
+      </div>
+    {/if}
+    {#if $readOnlyReason === 'mobile'}
+      <div data-testid="mobile-banner" role="status" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-gray-50 border-b border-gray-200 px-4 py-1.5 text-sm text-gray-900">
+        <span class="flex-1 min-w-48">{$t('editor.mobile.viewOnly')}</span>
+        <button data-testid="mobile-enable-editing" class="font-semibold underline" onclick={enableMobileEditing}>{$t('editor.mobile.enableEditing')}</button>
       </div>
     {/if}
     <!-- Keep canvas/viewer controls beneath toolbar menus and project dialogs. -->
