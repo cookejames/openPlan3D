@@ -3,15 +3,19 @@ import type { Project } from '$lib/models/types';
 import { currentProject, loadProject } from '$lib/stores/project';
 import { autoSave, markClean, saveError, saveState } from '$lib/stores/saveStatus';
 import { readProject } from '$lib/utils/projectValidation';
-import { localStore, ProjectConflictError } from './datastore';
+import { ProjectConflictError } from './datastore';
+import { projectStore } from './projectStore';
 import { prepareToLeave } from './deployment';
+import { readOnly } from '$lib/stores/readOnly';
+import { storage } from '$lib/firebase';
+import { readSharedSnapshot, ShareNotFoundError } from './cloudStore';
 
 let latestRequest = 0;
 
 /** An ID the library lacks stays taken while this tab remembers a revision of it: the store refuses to recreate a deleted plan. */
 async function taken(id: string): Promise<boolean> {
-  if (await localStore.has(id)) return true;
-  try { await localStore.assertCurrent(id); return false; }
+  if (await projectStore.has(id)) return true;
+  try { await projectStore.assertCurrent(id); return false; }
   catch (error) { if (error instanceof ProjectConflictError) return true; throw error; }
 }
 
@@ -73,7 +77,7 @@ export async function openStoredProject(id: string, signal?: AbortSignal): Promi
   const request = ++latestRequest;
   const superseded = () => signal?.aborted || request !== latestRequest;
   try {
-    const project = await localStore.load(id);
+    const project = await projectStore.load(id);
     if (superseded()) return null;
     if (!project) throw new Error('This project is no longer in your library.');
     if (!await prepareToLeave()) {
@@ -89,4 +93,42 @@ export async function openStoredProject(id: string, signal?: AbortSignal): Promi
     if (superseded()) return null;
     throw error;
   }
+}
+
+export type SharedOpenResult =
+  | { status: 'ok'; project: Project }
+  | { status: 'notFound' }
+  | { status: 'unavailable' }
+  | { status: 'error'; error: unknown };
+
+/**
+ * Open a public share link read-only. Nothing is written anywhere: the project is
+ * only held in memory until the viewer explicitly saves a copy.
+ */
+export async function openSharedProject(token: string, signal?: AbortSignal): Promise<SharedOpenResult> {
+  if (!storage) return { status: 'unavailable' };
+  let project: Project;
+  try {
+    project = readProject(JSON.parse(await readSharedSnapshot(storage, token)));
+  } catch (error) {
+    if (error instanceof ShareNotFoundError) return { status: 'notFound' };
+    return { status: 'error', error };
+  }
+  if (signal?.aborted) return { status: 'error', error: new Error('Aborted') };
+  // Whatever plan this tab already holds is preserved before it is replaced.
+  if (!await prepareToLeave()) {
+    return { status: 'error', error: new Error(get(saveError) ?? 'Your current plan could not be saved.') };
+  }
+  readOnly.set(true);
+  loadProject(project);
+  markClean();
+  return { status: 'ok', project };
+}
+
+/** Leave read-only mode (the shared plan stays only in memory). */
+export function leaveSharedView() { readOnly.set(false); }
+
+/** Keep a private, editable copy of the open shared plan in this browser only. Returns its new id. */
+export async function saveSharedCopy(project: Project): Promise<string> {
+  return (await projectStore.saveCopy(project, 'Shared copy')).id;
 }

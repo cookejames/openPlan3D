@@ -6,14 +6,19 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
-  import { localStore, storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { projectStore } from '$lib/services/projectStore';
+  import { authState } from '$lib/stores/auth';
   import { openProject } from '$lib/services/projectOpening';
   import { createDefaultProject } from '$lib/stores/project';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
   import LibraryRestoreDialog from '$lib/components/LibraryRestoreDialog.svelte';
   import ProjectPackageDialog from '$lib/components/ProjectPackageDialog.svelte';
   import LibraryStorageNote from '$lib/components/LibraryStorageNote.svelte';
+  import AccountButton from '$lib/components/AccountButton.svelte';
   import ProjectActionsMenu from '$lib/components/ProjectActionsMenu.svelte';
+  import ShareDialog from '$lib/components/ShareDialog.svelte';
+  import SyncBadge from '$lib/components/SyncBadge.svelte';
   import { houseTemplates } from '$lib/utils/houseTemplates';
 
   const openingLifetime = new AbortController();
@@ -39,6 +44,19 @@
 
   let libraryError = $state<string | null>(null);
 
+  // Cloud sync: badges, uploads and the one-time upload prompt. Only shown while signed in.
+  const syncStatus = projectStore.syncStatus;
+  const cloudMeta = projectStore.cloudMeta;
+  let shareTarget = $state<{ id: string; name: string } | null>(null);
+  const signedIn = $derived($authState.status === 'signedIn');
+  const localProjects = $derived(signedIn ? projects.filter(project => $syncStatus[project.id] === 'local') : []);
+  let syncUid = $state<string | null>(null);
+  let promptDismissed = $state(false);
+  let uploadingId = $state<string | null>(null);
+  let uploadBusy = $state(false);
+  let uploadRun = $state<{ done: number; total: number; failed: number } | null>(null);
+  let syncError = $state<string | null>(null);
+
   async function withLibraryError(action: () => Promise<void>) {
     try { await action(); libraryError = null; }
     catch (error) { libraryError = storageErrorMessage(error); }
@@ -49,13 +67,58 @@
     catch (error) { libraryError = storageErrorMessage(error); }
   }
 
+  let refreshSeq = 0;
   async function refreshProjects() {
+    const seq = ++refreshSeq;
     loading = true;
     try {
-      projects = await localStore.list();
-      projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      thumbnails = await localStore.getThumbnails();
-    } finally { loading = false; }
+      const rows = await projectStore.list();
+      // A newer refresh (for example the one after sign-in) supersedes this one, so an older list cannot overwrite it.
+      if (seq !== refreshSeq) return;
+      rows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      projects = rows;
+      const nextThumbnails = await projectStore.getThumbnails();
+      if (seq !== refreshSeq) return;
+      thumbnails = nextThumbnails;
+    } finally { if (seq === refreshSeq) loading = false; }
+  }
+
+  function promptStorageKey(uid: string) { return `o3d_cloud_upload_prompt_dismissed:${uid}`; }
+  function readPromptDismissed(uid: string): boolean {
+    try { return localStorage.getItem(promptStorageKey(uid)) === '1'; } catch { return false; }
+  }
+  function persistPromptDismissal() {
+    promptDismissed = true;
+    if (!syncUid) return;
+    try { localStorage.setItem(promptStorageKey(syncUid), '1'); } catch { /* the prompt may show again in this browser */ }
+  }
+  function dismissPrompt() { persistPromptDismissal(); uploadRun = null; }
+
+  /** Sends local projects one at a time; a failure is counted and the run goes on. */
+  async function uploadAll() {
+    if (uploadBusy) return;
+    const ids = localProjects.map(project => project.id);
+    if (ids.length === 0) return;
+    persistPromptDismissal();
+    uploadBusy = true; syncError = null;
+    let failed = 0;
+    uploadRun = { done: 0, total: ids.length, failed };
+    for (const [index, id] of ids.entries()) {
+      uploadingId = id;
+      try { await projectStore.uploadToCloud(id); }
+      catch { failed += 1; }
+      uploadRun = { done: index + 1, total: ids.length, failed };
+    }
+    uploadingId = null; uploadBusy = false;
+    uploadRun = failed === 0 ? null : { done: ids.length, total: ids.length, failed };
+  }
+
+  async function uploadOne(project: { id: string; name: string }) {
+    if (uploadBusy) return;
+    uploadBusy = true; uploadingId = project.id; syncError = null;
+    try { await projectStore.uploadToCloud(project.id); }
+    catch { syncError = $t('library.sync.uploadFailed', { name: project.name || $t('library.untitled') }); }
+    finally { uploadingId = null; uploadBusy = false; }
   }
 
   /** `file` is a library backup the welcome's Import a Plan was given. */
@@ -67,6 +130,23 @@
   }
 
   onMount(() => {
+    // The first auth value is covered by the load below; a later change of user (sign-in or sign-out) reloads the list.
+    let listedUid: string | null | undefined;
+    const unsubscribeAuth = authState.subscribe((auth) => {
+      const uid = auth.status === 'signedIn' ? auth.user.uid : null;
+      if (uid === listedUid) return;
+      const first = listedUid === undefined;
+      listedUid = uid;
+      syncUid = uid;
+      promptDismissed = uid !== null && readPromptDismissed(uid);
+      if (!first) void withLibraryError(refreshProjects);
+    });
+    // Cloud thumbnails arrive after the list renders; re-read them when the store has cached some.
+    let thumbsSeen = true;
+    const unsubscribeThumbs = projectStore.thumbnailsUpdated.subscribe(() => {
+      if (thumbsSeen) { thumbsSeen = false; return; }
+      void projectStore.getThumbnails().then(next => { thumbnails = next; });
+    });
     void withLibraryError(async () => {
       await refreshProjects();
       const seen = localStorage.getItem('hasSeenWelcome');
@@ -74,6 +154,7 @@
         showWelcome = true;
       }
     });
+    return () => { unsubscribeAuth(); unsubscribeThumbs(); };
   });
 
   async function createProject(create: () => unknown) {
@@ -98,7 +179,7 @@
     duplicating = true; duplicatedId = null;
     let copyId: string | null = null;
     await withLibraryError(async () => {
-      const dup = await localStore.duplicate(id);
+      const dup = await projectStore.duplicate(id);
       if (!dup) throw new Error($t('library.gone'));
       copyId = dup.id;
     });
@@ -122,13 +203,13 @@
     if (!action || actionBusy || (action.type === 'rename' && !name)) return;
     actionBusy = true; actionError = null;
     try {
-      if (action.type === 'delete') await localStore.delete(action.id);
+      if (action.type === 'delete') await projectStore.delete(action.id);
       else {
-        const project = await localStore.load(action.id);
+        const project = await projectStore.load(action.id);
         if (!project) throw new Error($t('library.goneAction'));
         project.name = name;
         project.updatedAt = new Date();
-        await localStore.save(project);
+        await projectStore.save(project);
       }
     } catch (error) {
       actionError = storageErrorMessage(error);
@@ -190,6 +271,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {$t('library.new')}
         </button>
+        <AccountButton variant="library" />
       </div>
     </div>
   </div>
@@ -219,6 +301,29 @@
         </div>
       </div>
     {/if}
+    {#if signedIn && (uploadRun || (!promptDismissed && localProjects.length > 0))}
+      <div class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        {#if uploadRun}
+          {#if uploadRun.done < uploadRun.total}
+            <p role="status">{$t('library.sync.progress', { done: uploadRun.done, total: uploadRun.total })}</p>
+          {:else}
+            <p role="alert">{$t('library.sync.someFailed', { failed: uploadRun.failed, total: uploadRun.total })}</p>
+            <button class="font-semibold underline" onclick={dismissPrompt}>{$t('library.sync.dismiss')}</button>
+          {/if}
+        {:else}
+          <p>{$t(localProjects.length === 1 ? 'library.sync.promptOne' : 'library.sync.promptMany', { count: localProjects.length })}</p>
+          <div class="flex flex-wrap gap-4">
+            <button class="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700" onclick={uploadAll}>{$t('library.sync.uploadAll')}</button>
+            <button class="font-semibold underline" onclick={dismissPrompt}>{$t('library.sync.notNow')}</button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+    {#if syncError}
+      <div role="alert" class="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <p>{syncError}</p>
+      </div>
+    {/if}
     {#if loading && projects.length === 0}
       <p role="status" class="py-12 text-center text-gray-500">{$t('library.loadingSaved')}</p>
     {:else if projects.length === 0 && !libraryError}
@@ -240,6 +345,7 @@
     {:else}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {#each projects as project (project.id)}
+          {@const status = signedIn ? (uploadingId === project.id ? 'uploading' : $syncStatus[project.id]) : undefined}
           <div class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-gray-300 transition-all duration-200 relative {project.id === duplicatedId ? 'ring-2 ring-blue-400' : ''}">
             <!-- Thumbnail -->
             <a href={`${base}/editor?id=${encodeURIComponent(project.id)}`} aria-label={$t('library.openName', { name: project.name || $t('library.untitled') })} class="block">
@@ -262,10 +368,18 @@
               <p class="text-xs text-gray-400 mt-1">{formatDate(project.updatedAt, $locale)}</p>
             </div>
 
+            {#if status}
+              <div class="absolute top-3 left-3 z-10 pointer-events-none"><SyncBadge {status} /></div>
+            {/if}
+
             <ProjectActionsMenu name={project.name} disabled={duplicating}
+              uploadable={signedIn && $syncStatus[project.id] === 'local'} uploadBusy={uploadBusy}
+              shareable={signedIn && $syncStatus[project.id] !== 'local' && !!$cloudMeta[project.id]}
               onaction={(action) => {
                 if (action === 'open') goto(`${base}/editor?id=${encodeURIComponent(project.id)}`);
                 else if (action === 'duplicate') void duplicateProject(project.id);
+                else if (action === 'upload') void uploadOne(project);
+                else if (action === 'share') shareTarget = { id: project.id, name: project.name };
                 else openAction(action, project);
               }} />
           </div>
@@ -273,6 +387,10 @@
       </div>
     {/if}
   </div>
+
+  {#if shareTarget && signedIn}
+    <ShareDialog id={shareTarget.id} name={shareTarget.name} onclose={() => shareTarget = null} />
+  {/if}
 
   {#if actionDialog}
     <dialog use:modalDialog aria-labelledby="library-action-title" aria-describedby="library-action-description"
@@ -283,7 +401,10 @@
         <h2 id="library-action-title" class="text-lg font-semibold">{actionDialog.type === 'rename' ? $t('library.renameTitle') : $t('library.deleteTitle')}</h2>
         <p id="library-action-description" class="mt-2 break-words text-sm text-gray-500">
           {#if actionDialog.type === 'rename'}{$t('library.renameHelp', { name: actionDialog.name })}
-          {:else}{$t('library.deleteHelp', { name: actionDialog.name })}{/if}
+          {:else}
+            {@const cloud = signedIn ? $cloudMeta[actionDialog.id] : undefined}
+            {$t(!cloud ? 'library.deleteHelp' : cloud.isOwner ? 'library.deleteHelpCloudOwner' : 'library.deleteHelpCloudShared', { name: actionDialog.name })}
+          {/if}
         </p>
         {#if actionDialog.type === 'rename'}
           <label for="library-project-name" class="mt-4 block text-sm font-medium">{$t('library.name')}</label>

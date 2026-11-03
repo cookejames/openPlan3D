@@ -19,7 +19,9 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:browser": "playwright test",
+		"test:e2e:cloud": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"playwright test --config playwright.cloud.config.ts\"",
 		"test:watch": "vitest",
+		"test:emulator": "firebase emulators:exec --only auth,firestore,storage --project demo-openplan3d \"vitest run --config vitest.emulator.config.ts\"",
 		"benchmark:viewer": "playwright test --config=playwright.benchmark.config.ts",
 		"benchmark:fixtures": "node tooling/render-fixtures.mjs",
 		"catalog:manifest": "node tooling/catalog-manifest.mjs",
@@ -27,6 +29,7 @@
 		"build:render-lab": "vite build --config tooling/render-lab-site/vite.config.ts"
 	},
 	"devDependencies": {
+		"@firebase/rules-unit-testing": "^5.0.2",
 		"@playwright/test": "1.63.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/adapter-node": "^5.5.7",
@@ -36,6 +39,7 @@
 		"@types/three": "^0.182.0",
 		"fake-indexeddb": "^6.2.5",
 		"firebase": "^12.18.0",
+		"firebase-tools": "^15.34.2",
 		"svelte": "^5.57.0",
 		"svelte-check": "^4.3.6",
 		"tailwindcss": "^4.1.18",

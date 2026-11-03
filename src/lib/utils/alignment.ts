@@ -10,6 +10,7 @@ import { columnPlanBounds } from './columnPlanGeometry';
 import { entouragePlanBounds } from './entouragePlanBounds';
 import { planContentBounds } from './planContentBounds';
 import { projectSettings } from '$lib/stores/settings';
+import { readOnly } from '$lib/stores/readOnly';
 import { entourageAspect } from './canvasRenderer';
 import type { Floor, CustomEntourageDef, Point } from '$lib/models/types';
 
@@ -82,7 +83,7 @@ export function planAlignment(floor: Floor, ids: ReadonlySet<string>, op: Alignm
 
 export function alignElements(ids: Set<string>, op: AlignmentOp, context?: CanvasRenderingContext2D) {
   const p = get(currentProject), floor = get(activeFloor);
-  if (!p || !floor) return;
+  if (!p || !floor || get(readOnly)) return;
   // Measure at one pixel per world unit so alignment does not change with zoom.
   const measurementContext = context ?? (typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') ?? undefined : undefined);
   const updates = planAlignment(floor,ids,op,p.customEntourage,measurementContext,get(projectSettings).units);

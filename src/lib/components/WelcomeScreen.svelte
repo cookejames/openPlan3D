@@ -11,6 +11,7 @@
   import { createDefaultProject } from '$lib/stores/project';
   import { houseTemplates } from '$lib/utils/houseTemplates';
   import { modalDialog, reconcileNativeClose } from '$lib/utils/modalDialog';
+  import { authState, sendEmailLink, signIn } from '$lib/stores/auth';
 
   const openingLifetime = new AbortController();
   onDestroy(() => openingLifetime.abort());
@@ -49,6 +50,72 @@
 
   let showTemplates = $state(false);
   let showImport = $state(false);
+
+  // Sign-in view: the same two choices as the account button's signed-out panel.
+  let showSignIn = $state(false);
+  let signInBusy = $state(false);
+  let signInError = $state<string | null>(null);
+  let signInEmail = $state('');
+  let signInSentTo = $state<string | null>(null);
+  let signInEmailError = $state<string | null>(null);
+
+  function openSignIn() {
+    signInError = null;
+    signInEmailError = null;
+    showSignIn = true;
+  }
+
+  function closeSignIn() {
+    showSignIn = false;
+    signInError = null;
+    signInEmailError = null;
+    signInSentTo = null;
+  }
+
+  // Any completed sign-in (Google popup, or an email link opened on this page) closes the welcome;
+  // the library then shows the cloud projects.
+  $effect(() => { if ($authState.status === 'signedIn') markSeen(); });
+
+  async function onSignInWithGoogle() {
+    if (signInBusy) return;
+    signInBusy = true;
+    signInError = null;
+    try {
+      await signIn();
+    } catch (error) {
+      console.error('Sign-in failed', error);
+      signInError = $t('account.signInError');
+    } finally {
+      signInBusy = false;
+    }
+  }
+
+  async function onSendSignInLink(event: SubmitEvent) {
+    event.preventDefault();
+    if (signInBusy) return;
+    signInBusy = true;
+    signInEmailError = null;
+    try {
+      const target = signInEmail.trim().toLowerCase();
+      await sendEmailLink(signInEmail);
+      signInSentTo = target;
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === 'invalid-email' || code === 'auth/invalid-email') {
+        signInEmailError = $t('account.invalidEmail');
+      } else {
+        console.error('Sending sign-in link failed', error);
+        signInEmailError = code === 'auth/too-many-requests' ? $t('account.tooManyRequests') : $t('account.sendLinkError');
+      }
+    } finally {
+      signInBusy = false;
+    }
+  }
+
+  function useDifferentSignInEmail() {
+    signInSentTo = null;
+    signInEmailError = null;
+  }
 
   let fileInput: HTMLInputElement;
 
@@ -102,6 +169,7 @@
     event.preventDefault();
     if (showTour) showTour = false;
     else if (showTemplates) showTemplates = false;
+    else if (showSignIn) closeSignIn();
   }
 </script>
 
@@ -157,6 +225,54 @@
         {/each}
       </div>
     </div>
+  {:else if showSignIn}
+    <!-- Sign-in choices -->
+    <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
+      <button onclick={closeSignIn} class="text-gray-400 hover:text-gray-600 mb-4 text-sm">{$t('welcome.back')}</button>
+      <h2 class="text-2xl font-bold text-gray-800 mb-2 text-center">{$t('welcome.signIn')}</h2>
+      <p class="text-sm text-gray-400 text-center mb-6">{$t('welcome.signInDesc')}</p>
+      <button
+        type="button"
+        onclick={onSignInWithGoogle}
+        disabled={signInBusy}
+        aria-busy={signInBusy}
+        class="w-full px-3 py-2.5 text-sm rounded-lg border-2 border-gray-200 text-gray-800 font-medium hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-wait"
+      >
+        {signInBusy && !signInSentTo ? $t('account.signingIn') : $t('account.google')}
+      </button>
+      {#if signInError}
+        <p role="alert" class="mt-2 text-xs text-red-700">{signInError}</p>
+      {/if}
+      <div class="my-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400" aria-hidden="true">
+        <span class="h-px flex-1 bg-gray-200"></span>{$t('account.or')}<span class="h-px flex-1 bg-gray-200"></span>
+      </div>
+      {#if signInSentTo}
+        <div role="status" class="flex flex-col gap-1 text-sm">
+          <p class="font-medium text-gray-800">{$t('account.checkEmailTitle')}</p>
+          <p class="text-gray-600">{$t('account.checkEmailBody', { email: signInSentTo })}</p>
+          <button type="button" onclick={useDifferentSignInEmail} class="self-start text-blue-700 underline text-sm">{$t('account.useDifferentEmail')}</button>
+        </div>
+      {:else}
+        <form onsubmit={onSendSignInLink} class="flex flex-col gap-2" novalidate>
+          <label for="welcome-signin-email" class="text-sm font-medium text-gray-800">{$t('account.emailLabel')}</label>
+          <input
+            id="welcome-signin-email"
+            type="email"
+            autocomplete="email"
+            bind:value={signInEmail}
+            placeholder={$t('account.emailPlaceholder')}
+            aria-invalid={signInEmailError ? 'true' : undefined}
+            class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
+          />
+          {#if signInEmailError}
+            <p role="alert" class="text-xs text-red-700">{signInEmailError}</p>
+          {/if}
+          <button type="submit" disabled={signInBusy} aria-busy={signInBusy} class="w-full px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait">
+            {signInBusy ? $t('account.sendingLink') : $t('account.sendLink')}
+          </button>
+        </form>
+      {/if}
+    </div>
   {:else}
     <!-- Main welcome card -->
     <div class="bg-white rounded-2xl shadow-2xl p-10 max-w-md w-full mx-4 text-center">
@@ -208,6 +324,19 @@
             <div class="text-xs text-gray-400">{$t('welcome.quickTourDesc')}</div>
           </div>
         </button>
+
+        {#if $authState.status === 'signedOut'}
+          <button
+            onclick={openSignIn}
+            class="w-full flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+          >
+            <span class="text-2xl">☁️</span>
+            <div>
+              <div class="font-semibold text-gray-800">{$t('welcome.signIn')}</div>
+              <div class="text-xs text-gray-400">{$t('welcome.signInDesc')}</div>
+            </div>
+          </button>
+        {/if}
       </div>
       {#if onRestoreLibrary}
         <button onclick={() => onRestoreLibrary?.()} class="mt-5 text-sm font-semibold text-blue-600 underline">{$t('welcome.restore')}</button>

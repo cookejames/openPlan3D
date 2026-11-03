@@ -201,8 +201,55 @@ export async function libraryBackup(): Promise<string> {
   } finally { db.close(); }
 }
 
+/** `uid` is the account the cloud copy belongs to; records written before it was kept have none. */
+export interface CloudSyncMeta { knownRev: number | null; pendingBaseRev: number | null; uid?: string | null }
+
+export function syncMetaKey(id: string) {
+  return `cloud-sync:${id}`;
+}
+
+export async function readSyncMeta(id: string): Promise<CloudSyncMeta | null> {
+  const raw = await readRecord('meta', syncMetaKey(id));
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw);
+    const rev = (v: unknown) => v === null || Number.isFinite(v);
+    if (!value || typeof value !== 'object' || !rev(value.knownRev) || !rev(value.pendingBaseRev)) return null;
+    const uid = typeof value.uid === 'string' ? value.uid : null;
+    return { knownRev: value.knownRev, pendingBaseRev: value.pendingBaseRev, ...(uid ? { uid } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+export function writeSyncMeta(id: string, meta: CloudSyncMeta): Promise<void> {
+  return withDatabase(db => transaction(db, ['meta'], 'readwrite', async tx => {
+    tx.objectStore('meta').put(JSON.stringify(meta), syncMetaKey(id));
+  }));
+}
+
+export function deleteSyncMeta(id: string): Promise<void> {
+  return withDatabase(db => transaction(db, ['meta'], 'readwrite', async tx => {
+    tx.objectStore('meta').delete(syncMetaKey(id));
+  }));
+}
+
 export function notifyLibraryChange(id: string) {
   // A tiny optional signal, never project data. Commit correctness does not depend
   // on notifications or localStorage quota; focus and saves recheck the database.
   try { localStorage.setItem(LIBRARY_CHANGE_KEY, JSON.stringify({ id, nonce: crypto.randomUUID() })); } catch {}
+}
+
+export const thumbCacheKey = (id: string) => `thumb-cache:${id}`;
+
+/** Writes a thumbnail cache entry (and the cloud version it came from) without any opened-revision check. */
+export function writeCachedThumbnail(id: string, dataUrl: string, version: string): Promise<void> {
+  return withDatabase(db => transaction(db, ['thumbnails', 'meta'], 'readwrite', async tx => {
+    tx.objectStore('thumbnails').put(dataUrl, id);
+    tx.objectStore('meta').put(version, thumbCacheKey(id));
+  }));
+}
+
+export function readCachedThumbnailVersion(id: string): Promise<string | null> {
+  return readRecord('meta', thumbCacheKey(id));
 }

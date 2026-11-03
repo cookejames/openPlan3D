@@ -1,6 +1,6 @@
 import { readProject } from '$lib/utils/projectValidation';
 import type { Project } from '$lib/models/types';
-import { withDatabase, transaction, request, records, readRecord, libraryBackup, notifyLibraryChange } from './localDatabase';
+import { withDatabase, transaction, request, records, readRecord, libraryBackup, notifyLibraryChange, syncMetaKey, thumbCacheKey, writeCachedThumbnail, readCachedThumbnailVersion } from './localDatabase';
 import { requestPersistentStorage } from './storagePersistence';
 export { PROJECTS_STORAGE_KEY, LIBRARY_CHANGE_KEY } from './localDatabase';
 
@@ -16,6 +16,17 @@ export interface DataStore {
   saveThumbnail(id: string, dataUrl: string): Promise<void>;
   getThumbnail(id: string): Promise<string | null>;
   getThumbnails(): Promise<Record<string, string>>;
+}
+
+export interface LocalDataStore extends DataStore {
+  /** Record raw bytes written by sync as the revision this tab has open, so saving them does not conflict. */
+  adopt(id: string, raw: string): Promise<void>;
+  /** Store a thumbnail fetched from the cloud, remembering which cloud version it is. A cache write: no opened-revision check. */
+  cacheThumbnail(id: string, dataUrl: string, version: string): Promise<void>;
+  /** The cloud version of a thumbnail written by cacheThumbnail, or null (none, or a locally rendered one). */
+  getCachedThumbnailVersion(id: string): Promise<string | null>;
+  /** Delete a project and its local data without the opened-revision check: sign-out clears cloud copies this tab never listed. */
+  discard(id: string): Promise<void>;
 }
 
 
@@ -65,8 +76,16 @@ export async function downloadLibraryBackup() {
   URL.revokeObjectURL(url);
 }
 
+function removeProject(tx: IDBTransaction, id: string) {
+  tx.objectStore('projects').delete(id);
+  tx.objectStore('thumbnails').delete(id);
+  tx.objectStore('history').delete(id);
+  tx.objectStore('meta').delete(syncMetaKey(id));
+  tx.objectStore('meta').delete(thumbCacheKey(id));
+}
+
 /** Each browser document remembers only revisions it actually opened or saved. */
-export function createLocalStore(): DataStore {
+export function createLocalStore(): LocalDataStore {
   const opened = new Map<string, string | null>();
   const listed = new Map<string, string>();
   const generations = new Map<string, number>();
@@ -94,6 +113,16 @@ export function createLocalStore(): DataStore {
       });
       // Committed work can now ask the browser to keep the library; the save never waits.
       void requestPersistentStorage();
+    },
+
+    async adopt(id, raw) {
+      await mutateLibrary(async () => {
+        await withDatabase(db => transaction(db, ['projects'], 'readwrite', async tx => {
+          tx.objectStore('projects').put(raw, id);
+        }));
+        opened.set(id, raw);
+        notifyLibraryChange(id);
+      });
     },
 
     async saveCopy(project, suffix = 'Recovered copy') {
@@ -148,15 +177,23 @@ export function createLocalStore(): DataStore {
 
     async delete(id) {
       await mutateLibrary(async () => {
-        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history'], 'readwrite', async tx => {
+        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history', 'meta'], 'readwrite', async tx => {
           const projects = tx.objectStore('projects');
           const expected = listed.has(id) ? listed.get(id) : opened.get(id);
           if (((await request(projects.get(id))) ?? null) !== (expected ?? null)) throw new ProjectConflictError();
-          projects.delete(id);
-          tx.objectStore('thumbnails').delete(id);
-          tx.objectStore('history').delete(id);
+          removeProject(tx, id);
         }));
         // Retain the opened revision so this editor cannot recreate a deleted plan.
+        listed.delete(id);
+        notifyLibraryChange(id);
+      });
+    },
+
+    async discard(id) {
+      await mutateLibrary(async () => {
+        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'history', 'meta'], 'readwrite', async tx => {
+          removeProject(tx, id);
+        }));
         listed.delete(id);
         notifyLibraryChange(id);
       });
@@ -180,11 +217,18 @@ export function createLocalStore(): DataStore {
     async saveThumbnail(id, dataUrl) {
       const expected = opened.get(id);
       try {
-        await withDatabase(db => transaction(db, ['projects', 'thumbnails'], 'readwrite', async tx => {
+        await withDatabase(db => transaction(db, ['projects', 'thumbnails', 'meta'], 'readwrite', async tx => {
           if (expected === undefined || expected === null || await request(tx.objectStore('projects').get(id)) !== expected) return;
           tx.objectStore('thumbnails').put(dataUrl, id);
+          tx.objectStore('meta').delete(thumbCacheKey(id)); // a locally rendered preview is no longer the cached cloud one
         }));
       } catch {} // Previews are optional; a failed preview cannot invalidate a saved plan.
+    },
+
+    async cacheThumbnail(id, dataUrl, version) { await writeCachedThumbnail(id, dataUrl, version); },
+
+    async getCachedThumbnailVersion(id) {
+      try { return await readCachedThumbnailVersion(id); } catch { return null; }
     },
 
     async getThumbnail(id) {

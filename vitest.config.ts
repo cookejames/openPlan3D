@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { catalogAssets } from './tooling/catalog-assets.mjs';
 
 export default defineConfig({
@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '$lib': fileURLToPath(new URL('./src/lib', import.meta.url)),
+      '$env/dynamic/public': fileURLToPath(new URL('./tests/fixtures/env-dynamic-public.ts', import.meta.url)),
       '$app/paths': fileURLToPath(new URL('./tests/fixtures/app-paths.ts', import.meta.url)),
     },
   },
@@ -14,6 +15,8 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['tests/fixtures/indexeddb.ts'],
     include: ['tests/**/*.test.ts'],
+    // Rules tests need the Firebase emulators; run them via `npm run test:emulator`.
+    exclude: [...configDefaults.exclude, 'tests/emulator/**'],
     restoreMocks: true,
     unstubGlobals: true,
   },

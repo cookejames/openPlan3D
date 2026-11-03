@@ -2,7 +2,8 @@ import { rawRecords, putRaw } from './fixtures/indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { openProject } from '$lib/services/projectOpening';
-import { createLocalStore, localStore } from '$lib/services/datastore';
+import { createLocalStore } from '$lib/services/datastore';
+import { projectStore } from '$lib/services/projectStore';
 import { currentProject, loadProject, updateProjectName } from '$lib/stores/project';
 import { initAutoSave, markClean, saveConflict, saveError, saveState } from '$lib/stores/saveStatus';
 import { roomProject } from './fixtures/project';
@@ -27,7 +28,7 @@ beforeEach(async () => {
   });
   loadProject(roomProject());
   markClean();
-  await localStore.save(get(currentProject)!);
+  await projectStore.save(get(currentProject)!);
   stop = initAutoSave();
 });
 afterEach(() => { stop(); markClean(); vi.useRealTimers(); });
@@ -36,17 +37,17 @@ it('saves pending current edits before importing, then saves the candidate separ
   const previousId = get(currentProject)!.id;
   updateProjectName('Keep these latest edits');
   const candidate = roomProject();
-  const saved = vi.spyOn(localStore, 'save');
+  const saved = vi.spyOn(projectStore, 'save');
   const opened = await openProject(() => candidate);
   expect(saved.mock.calls.map(([p]) => p.id)).toEqual([previousId, candidate.id]);
-  expect((await localStore.load(previousId))!.name).toBe('Keep these latest edits');
-  expect((await localStore.load(opened!.id))!.floors).toEqual(candidate.floors);
+  expect((await projectStore.load(previousId))!.name).toBe('Keep these latest edits');
+  expect((await projectStore.load(opened!.id))!.floors).toEqual(candidate.floors);
   expect(get(saveState)).toBe('saved');
   expect(get(currentProject)).toBe(opened);
 });
 
 it('does not write the previous project again when it is already saved', async () => {
-  const saved = vi.spyOn(localStore, 'save');
+  const saved = vi.spyOn(projectStore, 'save');
   await openProject(roomProject, 'new');
   expect(saved).toHaveBeenCalledOnce();
 });
@@ -55,7 +56,7 @@ it('validates before any save or state change, even with pending current edits',
   updateProjectName('Unsaved but safe');
   const before = get(currentProject), raw = await rawRecords();
   const candidate: any = roomProject(); candidate.floors[0].walls[0].start = null;
-  const saved = vi.spyOn(localStore, 'save');
+  const saved = vi.spyOn(projectStore, 'save');
   await expect(openProject(() => candidate)).rejects.toThrow('walls[0].start');
   expect(saved).not.toHaveBeenCalled();
   expect(get(currentProject)).toBe(before);
@@ -66,7 +67,7 @@ it('validates before any save or state change, even with pending current edits',
 it('retains current work and refuses replacement after a failed current save', async () => {
   updateProjectName('Cannot lose this');
   const before = get(currentProject), raw = await rawRecords();
-  vi.spyOn(localStore, 'save').mockRejectedValue(new DOMException('Full', 'QuotaExceededError'));
+  vi.spyOn(projectStore, 'save').mockRejectedValue(new DOMException('Full', 'QuotaExceededError'));
   await expect(openProject(roomProject)).rejects.toThrow('Your current plan could not be saved. Browser storage is full');
   expect(get(currentProject)).toBe(before);
   expect(await rawRecords()).toEqual(raw);
@@ -80,15 +81,15 @@ it('imports a current-ID collision as a copy without changing the input or losin
   expect(opened!.id).not.toBe(candidate.id);
   expect(opened!.name).toBe(`${candidate.name} (Imported copy)`);
   expect(opened!.floors).toEqual(candidate.floors);
-  expect((await localStore.load(candidate.id))!.name).toBe('Current revised plan');
+  expect((await projectStore.load(candidate.id))!.name).toBe('Current revised plan');
   expect(candidate.name).toBe('Regression plan');
-  expect((await localStore.list())).toHaveLength(2);
+  expect((await projectStore.list())).toHaveLength(2);
 });
 
 it('preserves a different saved entry with a colliding ID, including unreadable geometry', async () => {
   const candidate = roomProject(); candidate.id = '__proto__';
   await putRaw('projects', candidate.id, '{original damaged bytes');
-  expect(await localStore.has(candidate.id)).toBe(true);
+  expect(await projectStore.has(candidate.id)).toBe(true);
   const opened = await openProject(() => candidate);
   expect(opened!.id).not.toBe(candidate.id);
   expect((await rawRecords())[candidate.id]).toBe('{original damaged bytes');
@@ -97,15 +98,15 @@ it('preserves a different saved entry with a colliding ID, including unreadable 
 it('keeps a candidate available for export if its own save fails after preserving the old work', async () => {
   const previousId = get(currentProject)!.id;
   updateProjectName('Preserved first');
-  const candidate = roomProject(), save = localStore.save;
-  vi.spyOn(localStore, 'save').mockImplementation(p => p.id === candidate.id
+  const candidate = roomProject(), save = projectStore.save;
+  vi.spyOn(projectStore, 'save').mockImplementation(p => p.id === candidate.id
     ? Promise.reject(new DOMException('Full', 'QuotaExceededError')) : save(p));
   const opened = await openProject(() => candidate);
   expect(get(currentProject)).toBe(opened);
   expect(get(saveState)).toBe('unsaved');
   expect(get(saveError)).toContain('Browser storage is full');
-  expect((await localStore.load(previousId))!.name).toBe('Preserved first');
-  expect(await localStore.has(candidate.id)).toBe(false);
+  expect((await projectStore.load(previousId))!.name).toBe('Preserved first');
+  expect(await projectStore.has(candidate.id)).toBe(false);
 });
 
 it('can open an in-memory project without overwriting an unreadable library', async () => {
@@ -132,7 +133,7 @@ it('can open a first in-memory project when browser storage is denied', async ()
 it('does not replace a current project edited during its pending save', async () => {
   updateProjectName('First edit');
   const write = deferred<void>(), started = deferred<void>();
-  vi.spyOn(localStore, 'save').mockImplementationOnce(() => { started.resolve(); return write.promise; });
+  vi.spyOn(projectStore, 'save').mockImplementationOnce(() => { started.resolve(); return write.promise; });
   const pending = openProject(roomProject);
   await started.promise;
   updateProjectName('Later edit');
@@ -144,7 +145,7 @@ it('does not replace a current project edited during its pending save', async ()
 
 it('does not discard edits made while checking destination storage', async () => {
   const checking = deferred<boolean>(), started = deferred<void>();
-  vi.spyOn(localStore, 'has').mockImplementationOnce(() => { started.resolve(); return checking.promise; });
+  vi.spyOn(projectStore, 'has').mockImplementationOnce(() => { started.resolve(); return checking.promise; });
   const pending = openProject(roomProject);
   await started.promise;
   updateProjectName('Edited during destination check');
@@ -160,7 +161,7 @@ it('lets the latest import win when an older file finishes reading later', async
   old.resolve(roomProject());
   expect(await first).toBeNull();
   expect(get(currentProject)).toBe(latest);
-  expect(await localStore.list()).toHaveLength(2);
+  expect(await projectStore.list()).toHaveLength(2);
 });
 
 it('suppresses an outdated file error after a newer import succeeds', async () => {
@@ -189,7 +190,7 @@ it('ignores an import if another project was loaded during the file read', async
   expect(get(currentProject)).toBe(next);
 });
 
-it.each([['this tab', () => localStore], ['another tab', createLocalStore]])(
+it.each([['this tab', () => projectStore], ['another tab', createLocalStore]])(
   'imports the backup of an open plan deleted in %s as a copy that keeps saving', async (_tab, store) => {
     const deleted = get(currentProject)!, backup = JSON.parse(JSON.stringify(deleted));
     const library = store(); await library.list(); await library.delete(deleted.id);
@@ -203,6 +204,6 @@ it.each([['this tab', () => localStore], ['another tab', createLocalStore]])(
     updateProjectName('Edited after restoring');
     await vi.runAllTimersAsync();
     await vi.waitFor(() => expect(get(saveState)).toBe('saved'));
-    expect((await localStore.list()).map(p => p.id).sort()).toEqual([fresh.id, restored.id].sort());
-    expect((await localStore.load(restored.id))!.name).toBe('Edited after restoring');
+    expect((await projectStore.list()).map(p => p.id).sort()).toEqual([fresh.id, restored.id].sort());
+    expect((await projectStore.load(restored.id))!.name).toBe('Edited after restoring');
   });

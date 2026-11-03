@@ -5,6 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/browser',
   testMatch: '**/*.spec.ts',
+  // Needs the Firebase emulators: run with `npm run test:e2e:cloud`.
+  testIgnore: '**/cloud-sync.spec.ts',
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,

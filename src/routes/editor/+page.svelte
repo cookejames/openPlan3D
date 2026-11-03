@@ -12,9 +12,13 @@
   import { currentProject, viewMode, selectedElementId, selectedRoomId, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import { USER_GUIDE_URL } from '$lib/stores/exportNotice';
   import { interchangeProjectName } from '$lib/utils/interchange';
-  import { localStore, storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
+  import { projectStore } from '$lib/services/projectStore';
   import { autoSave, markClean, saveState } from '$lib/stores/saveStatus';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
+  import { readOnly, readOnlyReason } from '$lib/stores/readOnly';
+  import { editLockState, editAnyway } from '$lib/stores/editLock';
+  import { openSharedProject, leaveSharedView, saveSharedCopy } from '$lib/services/projectOpening';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
   import BuildPanel from '$lib/components/sidebar/BuildPanel.svelte';
   import PropertiesPanel from '$lib/components/sidebar/PropertiesPanel.svelte';
@@ -70,6 +74,40 @@
   let importingCapture = $state(false);
   let importError = $state<string | CaptureImportError | null>(null);
   let loadError = $state<string | null>(null);
+
+  // Public share link (?share=TOKEN): opened read-only, nothing is stored unless a copy is saved.
+  let shareToken = $state<string | null>(null);
+  let sharing = $state(false);
+  let shareFailure = $state<'notFound' | 'unavailable' | 'network' | null>(null);
+  let copyBusy = $state(false);
+  let copyError = $state<string | null>(null);
+
+  async function openShare(token: string): Promise<boolean> {
+    shareToken = token;
+    shareFailure = null;
+    sharing = true;
+    try {
+      const result = await openSharedProject(token);
+      if (result.status === 'ok') return true;
+      shareFailure = result.status === 'error' ? 'network' : result.status;
+      return false;
+    } finally { sharing = false; }
+  }
+
+  async function saveCopyHere() {
+    const project = get(currentProject);
+    if (!project || copyBusy) return;
+    copyBusy = true;
+    copyError = null;
+    try {
+      const id = await saveSharedCopy(project);
+      // A full navigation remounts the editor in normal, editable mode on the copy.
+      window.location.assign(`${base}/editor?id=${id}`);
+    } catch (error) {
+      copyError = error instanceof Error ? error.message : String(error);
+      copyBusy = false;
+    }
+  }
 
   async function backupLibrary() {
     try { await downloadLibraryBackup(); }
@@ -130,8 +168,16 @@
 
   async function initializeEditor() {
     loadError = null;
+    shareFailure = null;
     try {
       const url = new URL(window.location.href);
+
+      const share = url.searchParams.get('share');
+      if (share) {
+        if (await openShare(share)) ready = true;
+        return;
+      }
+      leaveSharedView();
 
       // iOS capture handoff: ?import=CODE
       const rawCode = url.searchParams.get('import');
@@ -153,7 +199,7 @@
         // A new/imported project may exist only in memory if its first save failed.
         const pending = get(currentProject);
         if (pending?.id === id && get(saveState) !== 'saved') { ready = true; return; }
-        const project = await localStore.load(id);
+        const project = await projectStore.load(id);
         if (project) {
           loadProject(project);
           markClean();
@@ -180,7 +226,7 @@
     // Imports can replace the active project from either sidebar or toolbar.
     // Keep reloads pointed at that project once initial route loading is complete.
     const stopSyncProjectUrl = currentProject.subscribe((project) => {
-      if (!ready || !project) return;
+      if (!ready || !project || get(readOnly)) return;
       const url = new URL(window.location.href);
       if (url.searchParams.get('id') === project.id) return;
       url.searchParams.delete('import');
@@ -188,18 +234,19 @@
       replaceState(url, page.state);
     });
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (get(saveState) !== 'saved') {
+      if (!get(readOnly) && get(saveState) !== 'saved') {
         void autoSave();
         event.preventDefault();
         event.returnValue = '';
       }
     };
     const onVisibilityChange = () => {
-      if (document.hidden && get(saveState) === 'unsaved') void autoSave();
+      if (document.hidden && !get(readOnly) && get(saveState) === 'unsaved') void autoSave();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
+      leaveSharedView();
       stopSyncProjectUrl();
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -225,9 +272,36 @@
 {#if ready}
   <div class="h-screen flex flex-col overflow-hidden">
     <TopBar onToggleLayers={() => showLayers = !showLayers} layersOpen={showLayers} onToggleHistory={toggleHistory} historyOpen={showUndoHistory} />
+    {#if $readOnlyReason === 'share'}
+      <div data-testid="share-banner" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-blue-50 border-b border-blue-200 px-4 py-1.5 text-sm text-blue-900">
+        <span class="flex-1 min-w-48 truncate">{$t('shareView.banner', { name: $currentProject?.name ?? '' })}</span>
+        {#if copyError}<span role="alert" class="text-red-700">{$t('shareView.saveFailed', { message: copyError })}</span>{/if}
+        <button class="font-semibold underline disabled:opacity-50" disabled={copyBusy} onclick={saveCopyHere}>{copyBusy ? $t('shareView.saving') : $t('shareView.saveCopy')}</button>
+      </div>
+    {/if}
+    {#if $readOnlyReason === 'lock'}
+      {@const lk = $editLockState}
+      {@const name = lk.holderEmail ?? ''}
+      <div data-testid="lock-banner" role="status" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-sm text-amber-900">
+        <span class="flex-1 min-w-48">
+          {#if lk.notice === 'finished'}
+            {lk.holderEmail && !lk.holderIsSelf ? $t('editor.lock.finished', { name }) : $t('editor.lock.finishedSelf')}
+          {:else if lk.notice === 'tookOver'}
+            {lk.holderIsSelf ? $t('editor.lock.tookOverSelf') : $t('editor.lock.tookOver', { name })}
+          {:else}
+            {lk.holderIsSelf ? $t('editor.lock.viewingSelf') : $t('editor.lock.viewing', { name })}
+          {/if}
+          {#if lk.notice !== 'finished'}<span class="text-amber-700"> · {$t('editor.lock.editAnywayHint')}</span>{/if}
+        </span>
+        {#if lk.error}<span role="alert" class="text-red-700">{$t('editor.lock.failed', { message: projectServiceMessage(lk.error, $locale) })}</span>{/if}
+        <button class="font-semibold underline disabled:opacity-50" disabled={lk.busy} onclick={() => void editAnyway()}>
+          {lk.busy ? $t('editor.lock.working') : lk.notice === 'finished' ? $t('editor.lock.editNow') : $t('editor.lock.editAnyway')}
+        </button>
+      </div>
+    {/if}
     <!-- Keep canvas/viewer controls beneath toolbar menus and project dialogs. -->
     <div class="flex flex-1 overflow-hidden isolate">
-      {#if mode === '2d'}
+      {#if mode === '2d' && !$readOnly}
         <!-- Build panel: inline sidebar on md+, off-canvas drawer on phones -->
         {#if buildPanelOpen}
           <div
@@ -243,7 +317,7 @@
       <div class="flex-1 min-w-0 relative">
         {#if mode === '2d'}
           <FloorPlanCanvas />
-          <AlignmentToolbar />
+          {#if !$readOnly}<AlignmentToolbar />{/if}
           {#if $elevationWallId}
             <!-- Integrated elevation view replaces the plan canvas area (sidebars stay) -->
             <ElevationView />
@@ -259,12 +333,12 @@
       {#if showLayers && mode === '2d'}
         <LayersPanel />
       {/if}
-      <PropertiesPanel is3D={mode === '3d'} />
+      {#if !$readOnly}<PropertiesPanel is3D={mode === '3d'} />{/if}
     </div>
   </div>
 
   <!-- Tools drawer FAB (mobile only) -->
-  {#if mode === '2d'}
+  {#if mode === '2d' && !$readOnly}
     <button
       class="md:hidden fixed bottom-4 left-4 w-12 h-12 rounded-full bg-blue-600 text-white shadow-lg active:bg-blue-700 transition-colors z-40 flex items-center justify-center"
       onclick={() => buildPanelOpen = !buildPanelOpen}
@@ -292,6 +366,7 @@
   {/if}
 
   <!-- Undo History toggle button -->
+  {#if !$readOnly}
   <button
     class="max-md:hidden fixed bottom-4 left-24 w-8 h-8 rounded-full shadow-lg hover:bg-slate-600 transition-colors z-50 text-sm"
     class:bg-blue-600={showUndoHistory}
@@ -305,6 +380,7 @@
   >⟲</button>
 
   <UndoHistoryPanel bind:visible={showUndoHistory} returnFocusTo={historyTrigger} />
+  {/if}
 
   <!-- Help button (desktop only — keyboard shortcuts are meaningless on touch) -->
   <button
@@ -509,6 +585,13 @@
       <button class="text-blue-700 underline" onclick={initializeEditor}>{$t('library.retry')}</button>
       <button class="text-blue-700 underline" onclick={backupLibrary}>{$t('library.backup')}</button>
       <a class="text-blue-700 underline" href={`${base}/`}>{$t('editorRecovery.back')}</a>
+    {:else if shareFailure}
+      <p role="alert" class="max-w-lg px-6 text-center text-red-700">{$t(shareFailure === 'notFound' ? 'shareView.notFound' : shareFailure === 'unavailable' ? 'shareView.unavailable' : 'shareView.network')}</p>
+      {#if shareFailure === 'network' && shareToken}<button class="text-blue-700 underline" onclick={initializeEditor}>{$t('library.retry')}</button>{/if}
+      <a class="text-blue-700 underline" href={`${base}/`}>{$t('editorRecovery.back')}</a>
+    {:else if sharing}
+      <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" aria-hidden="true"></div>
+      <p class="text-gray-400">{$t('shareView.loading')}</p>
     {:else if importingCapture}
       <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" aria-hidden="true"></div>
       <p class="text-gray-400">{$t('editorRecovery.importing')}</p>

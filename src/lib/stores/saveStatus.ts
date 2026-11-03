@@ -1,7 +1,9 @@
 import { writable, get } from 'svelte/store';
 import { currentProject, loadProject } from './project';
-import { localStore, storageErrorMessage, ProjectConflictError, PROJECTS_STORAGE_KEY, LIBRARY_CHANGE_KEY } from '$lib/services/datastore';
+import { storageErrorMessage, ProjectConflictError, PROJECTS_STORAGE_KEY, LIBRARY_CHANGE_KEY } from '$lib/services/datastore';
+import { projectStore } from '$lib/services/projectStore';
 import { saveSnapshot } from '$lib/stores/versionHistory';
+import { readOnly } from '$lib/stores/readOnly';
 import type { Project } from '$lib/models/types';
 
 export type SaveState = 'saved' | 'unsaved' | 'saving';
@@ -40,7 +42,7 @@ export function initAutoSave() {
     const project = get(currentProject);
     if (!project) return;
     const attempt = saveAttempt;
-    try { await localStore.assertCurrent(project.id); }
+    try { await projectStore.assertCurrent(project.id); }
     catch (error) {
       if (disposed || get(currentProject) !== project || attempt !== saveAttempt) return;
       clearSaveTimer();
@@ -80,6 +82,7 @@ function clearSaveTimer() {
 
 /** Mark project as dirty (unsaved). */
 export function markDirty() {
+  if (get(readOnly)) return;
   revision++;
   saveState.set('unsaved');
   clearSaveTimer();
@@ -101,7 +104,7 @@ function captureThumbnail(projectId: string) {
     if (!ctx) return;
     ctx.drawImage(canvas, 0, 0, tmp.width, tmp.height);
     const dataUrl = tmp.toDataURL('image/jpeg', 0.6);
-    localStore.saveThumbnail(projectId, dataUrl);
+    projectStore.saveThumbnail(projectId, dataUrl);
   } catch {}
 }
 
@@ -118,6 +121,8 @@ function scheduleThumbnail(project: Project) {
 /** Saves remain local; failures leave the current project available for export. */
 async function persist(manual: boolean): Promise<boolean> {
   clearSaveTimer();
+  // A shared plan is never written; there is nothing to save, so leaving is never blocked.
+  if (get(readOnly)) return true;
   const p = get(currentProject);
   if (!p) return false;
   if (lastProjectId !== p.id) {
@@ -130,7 +135,7 @@ async function persist(manual: boolean): Promise<boolean> {
   const attempt = ++saveAttempt;
   saveState.set('saving');
   try {
-    await localStore.save(p);
+    await projectStore.save(p);
     // A completed write must not mark newer edits or another project as saved.
     if (attempt === saveAttempt && savingRevision === revision && get(currentProject) === p) {
       // The canvas may still show the previous plan immediately after an import.
@@ -157,19 +162,27 @@ async function persist(manual: boolean): Promise<boolean> {
 export function autoSave() { return persist(false); }
 
 /** Manual save */
-export function manualSave() { return persist(true); }
+export async function manualSave() {
+  if (get(readOnly)) return true;
+  const ok = await persist(true);
+  const id = get(currentProject)?.id;
+  if (ok && id) {
+    try { void projectStore.flush(id).catch(() => {}); } catch { /* sync is best effort */ }
+  }
+  return ok;
+}
 
 /** Preserve this tab's version under a fresh ID before changing editor state. */
 export async function saveCurrentAsCopy(): Promise<boolean> {
   if (get(savingCopy)) return false;
   const project = get(currentProject);
-  if (!project) return false;
+  if (!project || get(readOnly)) return false;
   clearSaveTimer();
   saveAttempt++;
   const copyingRevision = revision;
   savingCopy.set(true);
   try {
-    const copy = await localStore.saveCopy(project);
+    const copy = await projectStore.saveCopy(project);
     if (get(currentProject)?.id !== project.id) return false;
     if (revision !== copyingRevision || get(currentProject) !== project) {
       if (get(saveState) !== 'saved') saveError.set('A copy was saved, but you made more edits while it was saving. Save another copy to keep the latest version.');

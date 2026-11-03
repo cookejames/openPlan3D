@@ -4,7 +4,7 @@ runConfig:
   cpu: 1
   memoryMiB: 512
   minInstances: 0
-  maxInstances: 2
+  maxInstances: 1
 
 env:
   # Node's default 512 KiB body limit is below the handoff's 1 MiB limit and the
@@ -14,20 +14,14 @@ env:
     value: 68M
     availability:
       - RUNTIME
-  # Quota endpoint for iPhone and sibling-planner link sharing; since the
-  # Storage rules cutover it is the only way captures reach the bucket (issue #30).
+  # Disabled in this fork: depends on the upstream maintainers' bucket.
   - variable: HANDOFF_UPLOADS_ENABLED
-    value: "true"
+    value: "false"
     availability:
       - RUNTIME
-  - variable: HANDOFF_BUCKET
-    value: openplan3d.firebasestorage.app
-    availability:
-      - RUNTIME
-  # Assistant shares (docs/assistant-shares.md). The 7-day assistant-shares/
-  # lifecycle rule was applied to the bucket on September 16, 2026.
+  # Disabled in this fork: depends on the upstream maintainers' bucket.
   - variable: ASSISTANT_SHARES_ENABLED
-    value: "true"
+    value: "false"
     availability:
       - RUNTIME
   - variable: NODE_ENV
@@ -40,3 +34,34 @@ env:
     value: dev
     availability:
       - BUILD
+  # Fill these from the Firebase console (Project settings > Your apps). They are public web config, not secrets.
+  - variable: PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyD1GdvoXM9TpNmXN1mL8TE1Q4T8uAXHy1Q
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: openplan3d-db739.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PUBLIC_FIREBASE_PROJECT_ID
+    value: openplan3d-db739
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: openplan3d-db739.firebasestorage.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "31650172995"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PUBLIC_FIREBASE_APP_ID
+    value: "1:31650172995:web:fc569966fb8d68e28084f6"
+    availability:
+      - BUILD
+      - RUNTIME

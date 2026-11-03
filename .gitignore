@@ -10,7 +10,7 @@ node_modules
 /playwright-report
 /test-results
 /benchmark-results
-firebase-debug.log
+*-debug.log
 
 # OS
 .DS_Store

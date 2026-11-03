@@ -30,6 +30,13 @@
   import { saveState, saveError, lastSavedAt, manualSave, autoSave, initAutoSave } from '$lib/stores/saveStatus';
   import { initVersionHistory, stopVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
   import VersionHistoryPanel from './VersionHistoryPanel.svelte';
+  import { readOnly, readOnlyReason } from '$lib/stores/readOnly';
+  import { startEditLock } from '$lib/stores/editLock';
+  import AccountButton from '$lib/components/AccountButton.svelte';
+  import { authState } from '$lib/stores/auth';
+  import { projectStore } from '$lib/services/projectStore';
+  import { remoteChange, syncBusy, syncError, keptCopyName, reloadLatest, keepMineAsCopy, startCloudWatch, closeCloudPlanOnSignOut } from '$lib/stores/cloudSync';
+  import { goto } from '$app/navigation';
 
   const openingLifetime = new AbortController();
   onDestroy(() => openingLifetime.abort());
@@ -137,6 +144,13 @@
   async function save() {
     await manualSave();
   }
+
+  const syncStatuses = projectStore.syncStatus;
+  const openSyncStatus = $derived($authState.status === 'signedIn' && $currentProject ? $syncStatuses[$currentProject.id] : undefined);
+  const SYNC_LABELS = { synced: 'editor.sync.synced', syncing: 'editor.sync.syncing', offline: 'editor.sync.offline', conflict: 'editor.sync.conflict', error: 'editor.sync.error' } as const;
+  const syncLabelKey = $derived(openSyncStatus && openSyncStatus in SYNC_LABELS ? SYNC_LABELS[openSyncStatus as keyof typeof SYNC_LABELS] : null);
+  const syncTone = $derived(openSyncStatus === 'synced' ? 'text-emerald-400' : openSyncStatus === 'syncing' ? 'text-amber-300 animate-pulse' : openSyncStatus === 'offline' ? 'text-white/50' : 'text-red-300');
+  const showRemote = $derived($remoteChange && $currentProject?.id === $remoteChange.id && openSyncStatus !== 'conflict');
 
   // Relative time for tooltip
   let secondsSinceSave = $state<number | null>(null);
@@ -264,6 +278,9 @@
 
   onMount(() => {
     const stopAutoSave = initAutoSave();
+    const stopCloudWatch = startCloudWatch();
+    const stopEditLock = startEditLock();
+    const stopCloudPlanOnSignOut = closeCloudPlanOnSignOut(() => { void goto(base || '/'); });
     initVersionHistory();
     const openSettings = () => { if (!hasOpenModal()) settingsOpen = true; };
     window.addEventListener('open-settings', openSettings);
@@ -297,6 +314,9 @@
       window.removeEventListener('open-settings', openSettings);
       if (get(saveState) === 'unsaved') void autoSave();
       stopAutoSave();
+      stopCloudWatch();
+      stopEditLock();
+      stopCloudPlanOnSignOut();
       stopVersionHistory();
       document.removeEventListener('click', handleClickOutside, true);
       document.removeEventListener('keydown', handleKeydown, true);
@@ -372,9 +392,10 @@
     />
   {:else}
     <button
-      class="font-semibold text-white text-sm hover:bg-white/10 px-2 py-0.5 rounded transition-colors max-w-[12rem] truncate max-xl:max-w-[4rem]"
-      onclick={() => editingName = true}
-      title={$t('projectToolbar.rename')}
+      class="font-semibold text-white text-sm hover:bg-white/10 disabled:hover:bg-transparent disabled:cursor-default px-2 py-0.5 rounded transition-colors max-w-[12rem] truncate max-xl:max-w-[4rem]"
+      onclick={() => { if (!$readOnly) editingName = true; }}
+      disabled={$readOnly}
+      title={$readOnly ? '' : $t('projectToolbar.rename')}
     >{projectName}</button>
   {/if}
 
@@ -386,6 +407,7 @@
       class="w-32 rounded bg-slate-700 px-2 py-1 text-xs text-white" title={$t('floorControls.switch')}>
       {#each floors as fl}<option value={fl.id}>{fl.name}</option>{/each}
     </select>
+    {#if !$readOnly}
     <div class="relative" bind:this={floorMenuRef}>
       <button
         onclick={() => floorMenuOpen = !floorMenuOpen}
@@ -412,17 +434,20 @@
         </div>
       {/if}
     </div>
+    {/if}
     <span class="text-white/40 text-[10px] ml-1">{floors.length}F</span>
   </div>
 
   <div class="flex-1"></div>
 
+  {#if !$readOnly}
   <button onclick={undo} class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors" title={$t('projectToolbar.undoHint')} aria-label={$t('projectToolbar.undo')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
   </button>
   <button onclick={redo} class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors" title={$t('projectToolbar.redoHint')} aria-label={$t('projectToolbar.redo')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"/></svg>
   </button>
+  {/if}
 
   <div class="h-5 w-px bg-white/20 max-xl:hidden"></div>
 
@@ -515,6 +540,7 @@
   <!-- Zoom remains available on the canvas and in the compact toolbar menu. -->
 
   <!-- Version History button -->
+  {#if !$readOnly}
   <button
     onclick={() => versionHistoryOpen = true}
     class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors max-xl:hidden"
@@ -523,6 +549,7 @@
   >
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
   </button>
+  {/if}
 
   <!-- Area summary button -->
   <button
@@ -564,11 +591,13 @@
               {fl.name}{fl.id === activeFloorId ? ' ✓' : ''}
             </button>
           {/each}
+          {#if !$readOnly}
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('outer'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.outerHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('copy'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.allHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor('empty'); }}>+ {$t('floorControls.add')} <span class="text-gray-400">{$t('floorControls.emptyHint')}</span></button>
           <button class="w-full px-3 py-2 text-sm text-red-700 hover:bg-gray-100 text-left disabled:opacity-40" disabled={floors.length <= 1}
             onclick={() => { onRemoveFloor(activeFloorId); moreOpen = false; }}>{$t('floorControls.remove')}</button>
+          {/if}
           <div class="h-px bg-gray-100 my-1"></div>
         {/if}
         {#if mode === '2d'}
@@ -585,10 +614,10 @@
           <div class="h-px bg-gray-100 my-1"></div>
         {/if}
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={toggleElevationView}>{$elevationWallId ? '✓ ' : ''}{$t('toolbarView.elevationView')}</button>
-        {#if onToggleHistory}
+        {#if onToggleHistory && !$readOnly}
           <button class="md:hidden w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-expanded={historyOpen} aria-label={$t('editorPanels.history')} onclick={() => { onToggleHistory?.(moreButton); moreOpen = false; }}>{$t('undoHistory.title')}</button>
         {/if}
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { versionHistoryOpen = true; moreOpen = false; }}>{$t('versions.title')}</button>
+        {#if !$readOnly}<button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { versionHistoryOpen = true; moreOpen = false; }}>{$t('versions.title')}</button>{/if}
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { areaOpen = true; moreOpen = false; }}>{$t('areaSummary.title')}</button>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { settingsOpen = true; moreOpen = false; }}>{$t('settings.title')}</button>
         <a href={USER_GUIDE_URL} target="_blank" rel="noopener" class="block w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { moreOpen = false; }}>{$t('help.userGuide')}</a>
@@ -656,6 +685,7 @@
         <p class="px-3 pb-2 text-xs text-gray-500">{$t('exportMenu.interchangeHelp')}</p>
         <div class="h-px bg-gray-100 my-1"></div>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={onShareWithAssistant}>{$t('exportMenu.assistant')}</button>
+        {#if !$readOnly}
         <div class="h-px bg-gray-100 my-1"></div>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={onImportJSON}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -669,10 +699,12 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {$t('library.new')}
         </button>
+        {/if}
       </div>
     {/if}
   </div>
 
+  {#if !$readOnly}
   <!-- Reserve the widest translated status so autosave cannot move toolbar targets. -->
   <span class="inline-grid shrink-0 text-[11px] font-medium max-xl:hidden">
     {#each (['saveControls.saving', 'saveControls.saved', 'saveControls.unsaved'] as const) as key}
@@ -688,9 +720,18 @@
     {/if}
     </span>
   </span>
+  {/if}
+  {#if (!$readOnly || $readOnlyReason === 'lock') && syncLabelKey}
+    <span data-testid="sync-status" class="shrink-0 whitespace-nowrap text-[11px] font-medium max-xl:hidden {syncTone}">{$t(syncLabelKey)}</span>
+  {/if}
+  {#if !$readOnly}
   <button onclick={save} class="px-3 py-1.5 max-xl:px-2.5 text-sm bg-white text-slate-800 font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
     {$t('saveControls.save')}
   </button>
+  {/if}
+  {#if !$readOnly || $readOnlyReason === 'lock'}
+  <AccountButton variant="toolbar" />
+  {/if}
 </div>
 
 {#if $saveError}
@@ -702,6 +743,28 @@
       <button class="font-semibold underline" onclick={save}>{$t('saveControls.retry')}</button>
     {/if}
     <button class="font-semibold underline" onclick={onExportJSON}>{$t('saveControls.backup')}</button>
+  </div>
+{/if}
+
+{#if openSyncStatus === 'conflict'}
+  <div role="alert" class="flex flex-wrap items-center gap-3 bg-amber-50 border-b border-amber-200 px-4 py-3 text-sm text-amber-900">
+    <span class="flex-1 min-w-48"><strong>{$t('editor.sync.conflictTitle')}</strong> {$t('editor.sync.conflictBody')}</span>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={reloadLatest}>{$syncBusy ? $t('editor.sync.working') : $t('editor.sync.loadLatest')}</button>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={keepMineAsCopy}>{$t('editor.sync.keepMine')}</button>
+    {#if $syncError}<span class="basis-full text-red-700">{projectServiceMessage($syncError, $locale)}</span>{/if}
+  </div>
+{:else if showRemote && $remoteChange}
+  <div role="status" class="flex flex-wrap items-center gap-3 bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-900">
+    <span class="flex-1 min-w-48">{$authState.status === 'signedIn' && $authState.user.email.toLowerCase() === $remoteChange.updatedBy.toLowerCase() ? $t('editor.sync.remoteUpdatedSelf') : $t('editor.sync.remoteUpdated', { email: $remoteChange.updatedBy })}</span>
+    <button class="font-semibold underline disabled:opacity-50" disabled={$syncBusy} onclick={reloadLatest}>{$syncBusy ? $t('editor.sync.reloading') : $t('editor.sync.reload')}</button>
+    <button class="font-semibold underline" onclick={() => remoteChange.set(null)}>{$t('editor.sync.dismiss')}</button>
+    {#if $syncError}<span class="basis-full text-red-700">{projectServiceMessage($syncError, $locale)}</span>{/if}
+  </div>
+{/if}
+{#if $keptCopyName && openSyncStatus !== 'conflict'}
+  <div role="status" class="flex items-center gap-3 bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-sm text-emerald-900">
+    <span class="flex-1">{$t('editor.sync.copyKept', { name: $keptCopyName })}</span>
+    <button class="font-semibold underline" onclick={() => keptCopyName.set(null)}>{$t('editor.sync.dismiss')}</button>
   </div>
 {/if}
 
