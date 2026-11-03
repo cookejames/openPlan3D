@@ -2,7 +2,7 @@ import { derived, get, writable, type Readable } from 'svelte/store';
 import { authState } from './auth';
 import { currentProject, loadProject } from './project';
 import { autoSave, markClean, saveState } from './saveStatus';
-import { readOnlyReason, setEditLockReadOnly } from './readOnly';
+import { mobileReadOnly, readOnlyReason, setEditLockReadOnly } from './readOnly';
 import { projectStore } from '$lib/services/projectStore';
 import { cloudStore, type CloudStore, type PresenceEntry } from '$lib/services/cloudStore';
 import { storageErrorMessage } from '$lib/services/datastore';
@@ -53,6 +53,8 @@ export interface LockSource {
   projectId: string | null;
   cloudTracked: boolean;
   shareView: boolean;
+  /** Mobile view-only default: don't take the lock until the user opts in to editing. */
+  viewOnly?: boolean;
 }
 
 export interface EditLockDeps {
@@ -199,7 +201,7 @@ export function createEditLock(deps: EditLockDeps, state = stateInner) {
     /** Re-target on any change of user / project / tracking / share view. */
     update(source: LockSource) {
       if (releasedUid !== null && source.user?.uid !== releasedUid) releasedUid = null;
-      const active = releasedUid === null && !!deps.presence && !!source.user && !!source.projectId && source.cloudTracked && !source.shareView;
+      const active = releasedUid === null && !!deps.presence && !!source.user && !!source.projectId && source.cloudTracked && !source.shareView && !source.viewOnly;
       const next = active ? `${source.user!.uid}|${source.projectId}` : '';
       if (next === key) return;
       if (key) void end();
@@ -271,12 +273,13 @@ export function startEditLock(): () => void {
     markClean,
     setReadOnly: setEditLockReadOnly,
   });
-  const source = derived([authState, currentProject, projectStore.cloudMeta, readOnlyReason],
-    ([a, p, meta, reason]): LockSource => ({
+  const source = derived([authState, currentProject, projectStore.cloudMeta, readOnlyReason, mobileReadOnly],
+    ([a, p, meta, reason, mobile]): LockSource => ({
       user: a.status === 'signedIn' ? { uid: a.user.uid } : null,
       projectId: p?.id ?? null,
       cloudTracked: !!p && !!meta[p.id],
       shareView: reason === 'share',
+      viewOnly: mobile,
     }));
   const stop = source.subscribe(s => lock.update(s));
   const onVis = () => { if (document.visibilityState === 'visible') lock.onVisible(); };

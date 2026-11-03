@@ -3,6 +3,7 @@
  * Extracted from FloorPlanCanvas.svelte.
  */
 import type { Point, Wall } from '$lib/models/types';
+import type { SnapStep } from '$lib/stores/settings';
 
 /** Shared canvas state passed to rendering / hit-test functions */
 export interface CanvasState {
@@ -16,6 +17,7 @@ export interface CanvasState {
 
 export const GRID = 20;
 export const SNAP = 10;
+export const SNAP_FINEST = 5;
 export const MAGNETIC_SNAP = 15;
 export const WALL_SNAP_DIST = 12;
 
@@ -27,9 +29,9 @@ export function worldToScreen(cs: CanvasState, wx: number, wy: number): { x: num
   return { x: (wx - cs.camX) * cs.zoom + cs.width / 2, y: (wy - cs.camY) * cs.zoom + cs.height / 2 };
 }
 
-export function snap(v: number, enabled: boolean, snapToGrid: boolean, gridSize: number): number {
-  if (!enabled) return v;
-  const step = snapToGrid ? gridSize : SNAP;
+export function snap(v: number, enabled: boolean, snapStep: SnapStep, gridSize: number): number {
+  if (!enabled || snapStep === 'off') return v;
+  const step = snapStep === 'grid' ? gridSize : snapStep;
   return Math.round(v / step) * step;
 }
 

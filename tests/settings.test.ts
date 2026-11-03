@@ -23,11 +23,13 @@ function blockStorage() {
   });
 }
 
+import { cycleSnapStep } from '../src/lib/utils/snapStep';
+
 const load = async () => (await import('../src/lib/stores/settings')).projectSettings;
 
 /** What S and the status-bar Snap button do. */
 function switchSnapStep(settings: Awaited<ReturnType<typeof load>>) {
-  settings.update((s) => ({ ...s, snapToGrid: !s.snapToGrid }));
+  settings.update(cycleSnapStep);
 }
 
 describe('editor settings', () => {
@@ -37,8 +39,16 @@ describe('editor settings', () => {
     expect(get(settings).snapToGrid).toBe(true);
     expect(() => switchSnapStep(settings)).not.toThrow();
     expect(get(settings).snapToGrid).toBe(false);
-    switchSnapStep(settings);
-    expect(get(settings).snapToGrid).toBe(true);
+    for (let i = 0; i < 3; i++) switchSnapStep(settings);
+    expect(get(settings)).toMatchObject({ snapToGrid: true, snapStep: 'grid' });
+  });
+
+  it('migrates settings saved with only snapToGrid to the matching snap step', async () => {
+    mockStorage().set('o3d_settings', JSON.stringify({ snapToGrid: false }));
+    expect(get(await load())).toMatchObject({ snapToGrid: false, snapStep: 10 });
+    vi.resetModules();
+    mockStorage().set('o3d_settings', JSON.stringify({ snapToGrid: true }));
+    expect(get(await load())).toMatchObject({ snapStep: 'grid' });
   });
 
   it('applies Settings changes for the session when site storage is blocked', async () => {

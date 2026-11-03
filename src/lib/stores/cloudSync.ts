@@ -19,7 +19,8 @@ export function handleRemoteChange(id: string, change: { updatedBy: string }) {
   const status = get(projectStore.syncStatus)[id];
   if (status === 'conflict') return;
   // Locked view (another session is editing): follow the holder silently, no notice.
-  if (get(readOnlyReason) === 'lock') { void reloadLatest(); return; }
+  // Locked or mobile view-only: follow the remote silently, nothing local to protect.
+  if (['lock', 'mobile'].includes(get(readOnlyReason) ?? '')) { void reloadLatest(); return; }
   const pending = get(saveState) !== 'saved' || status === 'syncing' || status === 'offline' || status === 'error';
   if (pending) {
     projectStore.markConflict(id);
@@ -70,7 +71,8 @@ export function keepMineAsCopy(): Promise<boolean> {
 
 /** Watch the open project for remote changes; resubscribes when the project id or auth changes. */
 export function startCloudWatch(): () => void {
-  if (get(readOnly)) return () => {};
+  // Mobile view-only still receives remote changes; only a share view has nothing to watch.
+  if (get(readOnlyReason) === 'share') return () => {};
   let unwatch: (() => void) | null = null;
   const target = derived([currentProject, authState], ([p, a]) => `${a.status === 'signedIn' ? a.user.uid : ''}|${p?.id ?? ''}`);
   let lastId = '';
