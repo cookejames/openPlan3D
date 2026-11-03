@@ -9,14 +9,14 @@
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
   import { reportLoadingFailure } from '$lib/services/deployment';
-  import { currentProject, viewMode, selectedElementId, selectedRoomId, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { currentProject, viewMode, selectedElementId, selectedRoomId, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode, panMode } from '$lib/stores/project';
   import { USER_GUIDE_URL } from '$lib/stores/exportNotice';
   import { interchangeProjectName } from '$lib/utils/interchange';
   import { storageErrorMessage, downloadLibraryBackup } from '$lib/services/datastore';
   import { projectStore } from '$lib/services/projectStore';
   import { autoSave, markClean, saveState } from '$lib/stores/saveStatus';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
-  import { readOnly, readOnlyReason, initMobileReadOnly, enableMobileEditing } from '$lib/stores/readOnly';
+  import { readOnly, readOnlyReason, initMobileReadOnly, enableMobileEditing, mobileReadOnly } from '$lib/stores/readOnly';
   import { editLockState, editAnyway } from '$lib/stores/editLock';
   import { openSharedProject, leaveSharedView, saveSharedCopy } from '$lib/services/projectOpening';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
@@ -221,8 +221,16 @@
     }
   }
 
+  /** Leaving the mobile view-only default goes back to selecting, so a drag edits rather than pans. */
+  function enableEditing() {
+    enableMobileEditing();
+    panMode.set(false);
+  }
+
   onMount(() => {
     initMobileReadOnly();
+    // Viewing on touch: a one-finger drag pans the plan instead of drawing a selection box.
+    if (get(mobileReadOnly)) panMode.set(true);
     void initializeEditor();
     // Imports can replace the active project from either sidebar or toolbar.
     // Keep reloads pointed at that project once initial route loading is complete.
@@ -303,7 +311,7 @@
     {#if $readOnlyReason === 'mobile'}
       <div data-testid="mobile-banner" role="status" class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-gray-50 border-b border-gray-200 px-4 py-1.5 text-sm text-gray-900">
         <span class="flex-1 min-w-48">{$t('editor.mobile.viewOnly')}</span>
-        <button data-testid="mobile-enable-editing" class="font-semibold underline" onclick={enableMobileEditing}>{$t('editor.mobile.enableEditing')}</button>
+        <button data-testid="mobile-enable-editing" class="font-semibold underline" onclick={enableEditing}>{$t('editor.mobile.enableEditing')}</button>
       </div>
     {/if}
     <!-- Keep canvas/viewer controls beneath toolbar menus and project dialogs. -->
