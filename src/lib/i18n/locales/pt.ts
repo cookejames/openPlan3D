@@ -1079,7 +1079,7 @@ export const pt = {
   "shortcuts.measure": "Ferramenta de medição",
   "shortcuts.annotate": "Ferramenta de cotas",
   "shortcuts.text": "Ferramenta de texto",
-  "shortcuts.snap": "Alternar passo do ajuste (grade / fino)",
+  "shortcuts.snap": "Alternar passo do ajuste (grade / 10 cm / 5 cm / desativado)",
   "shortcuts.undo": "Desfazer",
   "shortcuts.redo": "Refazer",
   "shortcuts.copy": "Copiar",

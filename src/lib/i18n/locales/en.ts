@@ -1079,7 +1079,7 @@ export const en = {
   "shortcuts.measure": "Measure tool",
   "shortcuts.annotate": "Annotate tool",
   "shortcuts.text": "Text tool",
-  "shortcuts.snap": "Switch snap step (grid / fine)",
+  "shortcuts.snap": "Switch snap step (grid / 10 cm / 5 cm / off)",
   "shortcuts.undo": "Undo",
   "shortcuts.redo": "Redo",
   "shortcuts.copy": "Copy",
