@@ -212,7 +212,7 @@ export const pt = {
   "editor.lock.tookOverSelf": "Outra janela ou dispositivo seu assumiu a edição · Somente leitura",
   "editor.lock.finished": "{name} terminou de editar.",
   "editor.lock.finishedSelf": "Sua outra janela terminou de editar.",
-  "editor.mobile.viewOnly": "Somente visualização no telemóvel. A edição funciona melhor num ecrã maior.",
+  "editor.mobile.viewOnly": "Somente visualização em dispositivos táteis. A edição funciona melhor com rato ou trackpad.",
   "editor.mobile.enableEditing": "Ativar edição",
   "editor.lock.editAnyway": "Editar mesmo assim",
   "editor.lock.editNow": "Editar agora",

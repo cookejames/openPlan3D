@@ -13,11 +13,12 @@ beforeEach(reset);
 afterEach(reset);
 
 describe('mobile read-only', () => {
-  it('detects coarse-pointer phone-sized viewports only', () => {
-    expect(isMobileBrowser(win(true, 390, 844))).toBe(true);
-    expect(isMobileBrowser(win(true, 844, 390))).toBe(true);
-    expect(isMobileBrowser(win(false, 390, 844))).toBe(false);
-    expect(isMobileBrowser(win(true, 1366, 1024))).toBe(false);
+  it('detects any touch-primary device whatever its size or orientation', () => {
+    expect(isMobileBrowser(win(true, 390, 844))).toBe(true);   // phone, portrait
+    expect(isMobileBrowser(win(true, 844, 390))).toBe(true);   // phone, landscape
+    expect(isMobileBrowser(win(true, 800, 830))).toBe(true);   // unfolded foldable
+    expect(isMobileBrowser(win(true, 1366, 1024))).toBe(true); // large tablet
+    expect(isMobileBrowser(win(false, 1366, 1024))).toBe(false); // mouse/trackpad, incl. touchscreen laptops
     expect(isMobileBrowser(undefined)).toBe(false);
   });
 

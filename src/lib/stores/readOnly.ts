@@ -31,11 +31,13 @@ export function setMobileReadOnly(value: boolean) { mobileActive.set(value); }
 /** The "Enable editing" action: clears only the mobile source for this session. */
 export const enableMobileEditing = () => mobileActive.set(false);
 
-/** Phone-sized touch device: coarse primary pointer and a short viewport side. SSR-safe. */
-export function isMobileBrowser(win: Pick<Window, 'matchMedia' | 'innerWidth' | 'innerHeight'> | undefined =
+/**
+ * Touch is the primary input: phones in either orientation, foldables folded or unfolded, and tablets of
+ * any size. Touchscreen laptops report their trackpad as primary, so they stay editable. SSR-safe.
+ */
+export function isMobileBrowser(win: Pick<Window, 'matchMedia'> | undefined =
   typeof window === 'undefined' ? undefined : window): boolean {
-  if (!win?.matchMedia) return false;
-  return win.matchMedia('(pointer: coarse)').matches && Math.min(win.innerWidth, win.innerHeight) <= 820;
+  return !!win?.matchMedia && win.matchMedia('(pointer: coarse)').matches;
 }
 
 let mobileChecked = false;
