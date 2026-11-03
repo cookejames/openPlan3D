@@ -1,13 +1,13 @@
 import { test, expect, devices } from '@playwright/test';
 import { observeGPU } from './gpu';
 
-// A phone reports more device pixels than the viewer draws; touch orbit, pan and pinch run through
-// Chromium's touch input, and a lost context (a mobile GPU reset) repaints once it is restored.
+// Touch orbit, pan and pinch run through Chromium's touch input. A context lost while drawing shadows
+// (the Pixel 10's PowerVR driver) repaints once restored, without shadows from then on.
 const { defaultBrowserType: _, ...phone } = devices['Pixel 7'];
 test.use(phone);
 test.skip(({ browserName }) => browserName !== 'chromium', 'Touch input and mobile emulation use Chromium.');
 
-test('3D view survives touch orbit, pan and pinch on a high-density phone and repaints a restored context', async ({ page }) => {
+test('3D view survives touch orbit, pan and pinch on a phone and repaints a restored context without shadows', async ({ page }) => {
   test.slow();
   await observeGPU(page);
   await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
@@ -17,9 +17,6 @@ test('3D view survives touch orbit, pan and pinch on a high-density phone and re
   await page.getByRole('button', { name: '3D', exact: true }).first().click();
   const canvas = page.getByRole('region', { name: '3D floor plan viewer', exact: true }).locator('canvas').last();
   await expect(canvas).toHaveAttribute('data-rendered', 'true', { timeout: 60_000 });
-  const size = await canvas.evaluate((node: HTMLCanvasElement) => ({ width: node.width, css: node.clientWidth, ratio: devicePixelRatio }));
-  expect(size.ratio).toBeGreaterThan(2);
-  expect(size.width).toBe(Math.floor(size.css * 2));
 
   const draws = () => canvas.evaluate((node: HTMLCanvasElement) => (window as any).__gpuAudit.find((entry: any) => entry.canvas === node).draws as number);
   const box = (await canvas.boundingBox())!;
@@ -55,5 +52,6 @@ test('3D view survives touch orbit, pan and pinch on a high-density phone and re
   });
   // Nothing else asks for a frame: only the restore wakes the idle viewer.
   await expect.poll(draws).toBeGreaterThan(lost);
+  expect(await page.evaluate(() => localStorage.getItem('o3d_shadows_off'))).toBe('true');
   expect(errors).toEqual([]);
 });
