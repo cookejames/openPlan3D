@@ -1,5 +1,8 @@
 import { get, writable } from 'svelte/store';
 
+/** Rounding step for the status-bar Snap button: the grid size, a fixed fine step in cm, or no rounding. */
+export type SnapStep = 'grid' | 10 | 5 | 'off';
+
 export interface ProjectSettings {
   units: 'metric' | 'imperial';         // m,cm vs ft,inch
   showDimensions: boolean;               // wall length labels
@@ -9,7 +12,8 @@ export interface ProjectSettings {
   showObjectDistance: boolean;            // distance from objects to walls
   dimensionLineColor: string;            // color for dimension lines/text
   wallMeasureMode: 'centerline' | 'edge'; // measure walls center-to-center or edge-to-edge (clear span)
-  snapToGrid: boolean;                   // snap elements to grid when dragging
+  snapToGrid: boolean;                   // legacy: grid step (true) or fine step (false); kept in sync with snapStep
+  snapStep: SnapStep;                    // step dragging rounds to: the grid size, 10 cm, 5 cm, or none
   snapToWalls: boolean;                  // snap furniture to nearby walls when dragging
   gridSize: number;                      // grid snap size in cm (default 25)
 }
@@ -24,6 +28,7 @@ const defaultSettings: ProjectSettings = {
   dimensionLineColor: '#1e293b',
   wallMeasureMode: 'centerline',
   snapToGrid: true,
+  snapStep: 'grid',
   snapToWalls: true,
   gridSize: 25,
 };
@@ -33,7 +38,12 @@ function loadSettings(): ProjectSettings {
   if (typeof window === 'undefined') return { ...defaultSettings };
   try {
     const saved = localStorage.getItem('o3d_settings');
-    if (saved) return { ...defaultSettings, ...JSON.parse(saved) };
+    if (saved) {
+      const s = JSON.parse(saved);
+      // Settings saved before snapStep existed only have snapToGrid: grid, or the 10 cm fine step.
+      if (s.snapStep === undefined) s.snapStep = s.snapToGrid === false ? 10 : 'grid';
+      return { ...defaultSettings, ...s };
+    }
   } catch {}
   return { ...defaultSettings };
 }

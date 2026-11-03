@@ -30,8 +30,8 @@
   import { openingDropTarget } from '$lib/utils/openingDrop';
   import { getWallTextureCanvas, getFloorTextureCanvas, setTextureLoadCallback } from '$lib/utils/textureGenerator';
   import { projectSettings, formatLength, formatArea } from '$lib/stores/settings';
-  import type { ProjectSettings } from '$lib/stores/settings';
-  import { snapStatus } from '$lib/utils/snapStep';
+  import type { ProjectSettings, SnapStep } from '$lib/stores/settings';
+  import { snapStatus, cycleSnapStep } from '$lib/utils/snapStep';
   import { angleSnapWithin, resizeFurnitureFromHandle, snap as _snap, type CanvasState } from '$lib/utils/canvasInteraction';
   import { drawWall as _drawWall, drawDoorOnWall as _drawDoorOnWall, drawWindowOnWall as _drawWindowOnWall, drawDoorDistanceDimensions as _drawDoorDistanceDimensions, drawWindowDistanceDimensions as _drawWindowDistanceDimensions, drawFurnitureItem, drawStair as _drawStair, drawColumn as _drawColumn, drawGuides as _drawGuides, drawPersistedMeasurements as _drawPersistedMeasurements, drawTextAnnotations as _drawTextAnnotations, drawAnnotation as _drawAnnotation, drawAnnotations as _drawAnnotations, drawRooms as _drawRooms, drawWallJoints as _drawWallJoints, drawSnapPoints as _drawSnapPoints, drawMinimap as _drawMinimap, drawEntourageItems as _drawEntourageItems, drawEntourageGhost as _drawEntourageGhost, drawFloorBelowGhost as _drawFloorBelowGhost, entourageAspect } from '$lib/utils/canvasRenderer';
   import { getEntourageDef } from '$lib/utils/entourageCatalog';
@@ -157,7 +157,7 @@
     units: 'metric', showDimensions: true, showExternalDimensions: true,
     showInternalDimensions: false, showExtensionLines: true,
     showObjectDistance: true, dimensionLineColor: '#1e293b',
-    wallMeasureMode: 'centerline', snapToGrid: true, snapToWalls: true, gridSize: 25,
+    wallMeasureMode: 'centerline', snapToGrid: true, snapStep: 'grid', snapToWalls: true, gridSize: 25,
   });
   onDestroy(projectSettings.subscribe((s) => {
     dimSettings = s;
@@ -202,11 +202,11 @@
   let currentDoorType: Door['type'] = $state('single');
   let currentWindowType: Win['type'] = $state('standard');
   let currentSnapEnabled: boolean = $state(true);
-  let currentSnapToGrid: boolean = $state(true);
+  let currentSnapStep: SnapStep = $state('grid');
   let currentSnapToWalls: boolean = $state(true);
   let currentGridSize: number = $state(25);
   // Status-bar Snap button: the step S picked, or "Snap off" while the top-bar switch is off.
-  let snapControl = $derived(snapStatus($t, { enabled: currentSnapEnabled, snapToGrid: currentSnapToGrid, gridSize: currentGridSize }, $projectSettings.units));
+  let snapControl = $derived(snapStatus($t, { enabled: currentSnapEnabled, snapStep: currentSnapStep, gridSize: currentGridSize }, $projectSettings.units));
   let isPlacingStair: boolean = $state(false);
   let draggingStairId: string | null = $state(null);
   let stairDragOffset: Point = { x: 0, y: 0 };
@@ -345,7 +345,7 @@
   }
 
   function snap(v: number): number {
-    return _snap(v, currentSnapEnabled, currentSnapToGrid, currentGridSize);
+    return _snap(v, currentSnapEnabled, currentSnapStep, currentGridSize);
   }
 
   function screenToWorld(sx: number, sy: number): Point {
@@ -433,7 +433,7 @@
 
   function drawGrid() {
     if (!ctx || !showGrid) return;
-    const step = (currentSnapToGrid ? currentGridSize : GRID) * zoom;
+    const step = (currentSnapStep === 'grid' ? currentGridSize : GRID) * zoom;
     if (step < 4) return;
 
     // Minor grid
@@ -1837,7 +1837,7 @@
     const unsub8 = placingDoorType.subscribe((t) => { currentDoorType = t; markDirty(); });
     const unsub9 = placingWindowType.subscribe((t) => { currentWindowType = t; markDirty(); });
     const unsub10 = snapEnabled.subscribe((v) => { currentSnapEnabled = v; markDirty(); });
-    const unsub_snapgrid = projectSettings.subscribe((s) => { currentSnapToGrid = s.snapToGrid; currentSnapToWalls = s.snapToWalls; currentGridSize = s.gridSize; markDirty(); });
+    const unsub_snapgrid = projectSettings.subscribe((s) => { currentSnapStep = s.snapStep; currentSnapToWalls = s.snapToWalls; currentGridSize = s.gridSize; markDirty(); });
     const unsub11 = placingStair.subscribe((v) => { isPlacingStair = v; markDirty(); });
     const unsubEnt1 = placingEntourageId.subscribe((id) => { currentEntourageDefId = id; if (id) { placingStair.set(false); placingColumn.set(false); } markDirty(); });
     const unsubEnt2 = currentProject.subscribe((pr) => {
@@ -3514,7 +3514,7 @@
     if (handled) return;
 
     if (e.key === 's' || e.key === 'S') {
-      projectSettings.update(s => ({ ...s, snapToGrid: !s.snapToGrid }));
+      projectSettings.update(cycleSnapStep);
     }
     if (e.key === 'g' || e.key === 'G') {
       showGrid = !showGrid;
@@ -4077,8 +4077,8 @@
     <button class="hover:text-gray-700" onclick={() => showGrid = !showGrid} title={$t('canvasDisplay.gridHint')} aria-pressed={showGrid}>
       {showGrid ? '▦' : '▢'} {$t('canvasDisplay.grid')}
     </button>
-    <!-- Snap (S) picks the step snapping rounds to and shows it; the top-bar Snap to Grid turns snapping off, and then this reads "Snap off". -->
-    <button class="hover:text-gray-700" onclick={() => projectSettings.update(s => ({ ...s, snapToGrid: !s.snapToGrid }))} title={snapControl.title} aria-pressed={snapControl.pressed}>
+    <!-- Snap (S) cycles the step snapping rounds to (grid, 10 cm, 5 cm, off) and shows it; the top-bar Snap to Grid also turns snapping off, and either way this reads "Snap off". -->
+    <button class="hover:text-gray-700" onclick={() => projectSettings.update(cycleSnapStep)} title={snapControl.title} aria-pressed={snapControl.pressed}>
       <span class:opacity-40={!currentSnapEnabled}>🧲</span> {snapControl.label}
     </button>
     <button class="hover:text-gray-700" onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))} title={$t('canvasDisplay.furnitureHint')} aria-pressed={showFurniture}>
