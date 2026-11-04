@@ -135,7 +135,7 @@ import/edit/undo/save/reload/export, damaged-file recovery, iPhone project packa
 photos, catalog loading, 3D and cold/warm asset transfers. Firefox and WebKit are
 opt-in: set the repository variable `CI_BROWSERS` to `["chromium","firefox","webkit"]`
 to run every engine on each push, or run the Web checks workflow manually with
-`engines: all` for a one-off check. Each engine runs in six shards against the same
+`engines: all` for a one-off check. Each engine runs in twelve shards against the same
 production build, with an isolated Node server and analytics/cloud uploads disabled.
 The final `check` job requires the build, static checks, unit tests, every browser
 job and the rendering benchmark assertions to pass. Engine-specific failure

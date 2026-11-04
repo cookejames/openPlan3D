@@ -81,7 +81,7 @@ jobs:
         browser: ${{ fromJSON(inputs.engines == 'all' && '["chromium","firefox","webkit"]' || vars.CI_BROWSERS || '["chromium"]') }}
         # Each engine has hundreds of cases; keep the complete suite within
         # the existing per-job limit without dropping tests or assertions.
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     # Browsers and their system libraries come preinstalled in the image that
     # matches @playwright/test; update the tag and digest together with it.
     container:
@@ -107,10 +107,10 @@ jobs:
           path: build/
       - name: Chromium and WebKit regressions
         if: matrix.browser != 'firefox'
-        run: npm run test:browser -- --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/6
+        run: npm run test:browser -- --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/12
       - name: Firefox regressions with a virtual display for WebGL
         if: matrix.browser == 'firefox'
-        run: xvfb-run -a npm run test:browser -- --project=firefox --headed --shard=${{ matrix.shard }}/6
+        run: xvfb-run -a npm run test:browser -- --project=firefox --headed --shard=${{ matrix.shard }}/12
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
       - name: Browser report and failure traces
