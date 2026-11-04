@@ -8,14 +8,13 @@ import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, S
 import { planWallResize, finitePoint, validPositiveDimension, validOpeningPosition, type WallEndpoint } from '$lib/utils/wallEditing';
 import { getOuterWalls } from '$lib/utils/outerWalls';
 import { nextFloorLevel, floorElevations, validFloorElevation, orderedFloors, DEFAULT_FLOOR_SPACING } from '$lib/utils/floors';
-import { getWallStartHeight, getWallEndHeight, getWallHeightAt, validWallHeight } from '$lib/models/types';
+import { getWallStartHeight, getWallEndHeight, getWallHeightAt, validWallHeight, projectDefaultWallHeight, validDefaultWallHeight } from '$lib/models/types';
 import type { DetailTarget, ItemDetails } from '$lib/models/types';
 import { detailItem, itemDetails, validateItemDetails } from '$lib/utils/itemDetails';
 import { readProject } from '$lib/utils/projectValidation';
 import { mergeRoomPlanFloors, selectableContentIds, type AddedContent } from '$lib/utils/roomplanMerge';
 import { doorJoin } from '$lib/utils/scanAlignment';
 import { readOnly } from '$lib/stores/readOnly';
-import { defaultWallHeight } from '$lib/stores/settings';
 
 
 function uid(): string {
@@ -327,7 +326,7 @@ const samePoint = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 
 export function addWall(start: Point, end: Point): string {
   const id = uid();
-  const height = defaultWallHeight();
+  const height = projectDefaultWallHeight(get(currentProject));
   mutate((f) => {
     // Copy the coordinates: the canvas passes magnet-snap results (with snappedTo* flags) and
     // reuses one point for the next wall's start; the model keeps plain, independent points.
@@ -1029,6 +1028,18 @@ export function updateProjectDescription(description: string) {
   if (!p || (p.description ?? '') === description) return;
   snapshot('Changed project description', 'project-description');
   p.description = description;
+  p.updatedAt = new Date();
+  currentProject.set({ ...p });
+}
+
+/** The open project's height for walls drawn from now on; existing walls keep theirs. Omission restores 280 cm. Rapid edits share one Undo step. */
+export function updateProjectDefaultWallHeight(height?: number) {
+  const p = editableProject();
+  if (!p || (height !== undefined && !validDefaultWallHeight(height))) return;
+  if (height === undefined ? p.defaultWallHeight === undefined : projectDefaultWallHeight(p) === height) return;
+  snapshot('Changed default wall height', 'project-default-wall-height');
+  if (height === undefined) delete p.defaultWallHeight;
+  else p.defaultWallHeight = height;
   p.updatedAt = new Date();
   currentProject.set({ ...p });
 }

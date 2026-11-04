@@ -1,5 +1,4 @@
 import { get, writable } from 'svelte/store';
-import { validWallHeight } from '$lib/models/types';
 
 /** Rounding step for the status-bar Snap button: the grid size, a fixed fine step in cm, or no rounding. */
 export type SnapStep = 'grid' | 10 | 5 | 'off';
@@ -17,15 +16,6 @@ export interface ProjectSettings {
   snapStep: SnapStep;                    // step dragging rounds to: the grid size, 10 cm, 5 cm, or none
   snapToWalls: boolean;                  // snap furniture to nearby walls when dragging
   gridSize: number;                      // grid snap size in cm (default 25)
-  defaultWallHeight: number;             // height in cm given to newly drawn walls (default 280)
-}
-
-/** Height in cm that new walls get when no Default wall height has been chosen. */
-export const DEFAULT_WALL_HEIGHT = 280;
-
-/** A usable Default wall height: a finite wall height above zero. */
-export function validDefaultWallHeight(value: unknown): value is number {
-  return validWallHeight(value) && value > 0;
 }
 
 const defaultSettings: ProjectSettings = {
@@ -41,7 +31,6 @@ const defaultSettings: ProjectSettings = {
   snapStep: 'grid',
   snapToWalls: true,
   gridSize: 25,
-  defaultWallHeight: DEFAULT_WALL_HEIGHT,
 };
 
 // Load from localStorage if available
@@ -53,8 +42,8 @@ function loadSettings(): ProjectSettings {
       const s = JSON.parse(saved);
       // Settings saved before snapStep existed only have snapToGrid: grid, or the 10 cm fine step.
       if (s.snapStep === undefined) s.snapStep = s.snapToGrid === false ? 10 : 'grid';
-      // Settings saved before defaultWallHeight existed (or with an unusable value) use the standard height.
-      if (!validDefaultWallHeight(s.defaultWallHeight)) s.defaultWallHeight = DEFAULT_WALL_HEIGHT;
+      // Briefly a browser-wide setting; the Default wall height now belongs to each project.
+      delete s.defaultWallHeight;
       return { ...defaultSettings, ...s };
     }
   } catch {}
@@ -87,12 +76,6 @@ function createSettingsStore() {
 }
 
 export const projectSettings = createSettingsStore();
-
-/** Height in cm for a newly created wall, from the Default wall height setting. */
-export function defaultWallHeight(): number {
-  const height = get(projectSettings).defaultWallHeight;
-  return validDefaultWallHeight(height) ? height : DEFAULT_WALL_HEIGHT;
-}
 
 /** Convert cm to display string based on current units */
 export function formatLength(cm: number, units: 'metric' | 'imperial'): string {
