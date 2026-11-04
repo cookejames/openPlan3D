@@ -125,6 +125,7 @@ export function readProject(value: unknown): Project {
       } else {
         choice(opening.type, ['standard', 'fixed', 'casement', 'sliding', 'bay'], `${path}.type`);
         number(opening.sillHeight, `${path}.sillHeight`, 0);
+        strings(opening, ['frameColor'], path);
       }
     });
     elements('furniture', (item, path) => {

@@ -118,6 +118,8 @@ export interface Window {
   height: number;
   sillHeight: number;
   type: 'standard' | 'fixed' | 'casement' | 'sliding' | 'bay';
+  /** Hex colour for the window frame, sashes and sill. Defaults to White. */
+  frameColor?: string;
 }
 
 export interface FurnitureItem {

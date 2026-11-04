@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, Raycaster, Vector3 } from 'three';
 
-// The fixture's straight wall runs along X at Z = 0; the exported scene is in metres.
+// The fixture's straight wall runs along X at Z = 0 and is 20 cm thick; the exported scene
+// is in metres. Only hits more than 5 cm off the wall line count: baseboards and wall faces
+// sit at the faces (±10 cm), while window frames and sashes set in the opening stay within it.
 function intersections(scene: any, x: number, height: number, wallsOnly: boolean) {
   const root = new Group(), material = new MeshBasicMaterial({ side: DoubleSide });
   for (const mesh of scene.meshes) {
@@ -14,7 +16,7 @@ function intersections(scene: any, x: number, height: number, wallsOnly: boolean
   }
   root.updateMatrixWorld(true);
   const ray = new Raycaster(new Vector3(x, height, .6), new Vector3(0, 0, -1), 0, 1.2);
-  const count = ray.intersectObject(root, true).length;
+  const count = ray.intersectObject(root, true).filter(hit => Math.abs(hit.point.z) > .05).length;
   root.traverse(node => { if (node instanceof Mesh) node.geometry.dispose(); }); material.dispose();
   return count;
 }
@@ -40,7 +42,7 @@ test('straight-wall baseboards stop at doorways and floor-level windows, as curv
   await page.getByRole('button', { name: 'Export Blender Scene', exact: true }).click();
   const scene = JSON.parse(await readFile((await (await pending).path())!, 'utf8'));
   await testInfo.attach('straight-opening-scene.json', { body: JSON.stringify(scene), contentType: 'application/json' });
-  // Rays 4 cm above the floor, clear of mullions and jambs. Baseboards export as proxy meshes.
+  // Rays 4 cm above the floor, clear of jambs. Baseboards export as proxy meshes, like window frames.
   expect(intersections(scene, -.75, .04, false)).toBe(0); // window with a 0 cm sill
   expect(intersections(scene, -3, .04, false)).toBe(0); // doorway
   // A sill above the 8 cm board leaves it running in front of the wall below the window.

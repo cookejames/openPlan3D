@@ -21,7 +21,7 @@
   import { roomHoles } from '$lib/utils/roomNesting';
   import { createSlopedBoxGeometry, mapWallUVs } from '$lib/utils/slopedWallGeometry';
   import { buildWallSegments, roomCeilingHeight, wallProfileSpans, wallPathProfile, pathOpening, doorPanelPose } from '$lib/utils/wallProfiles';
-  import { doorFrameColor, isGlazedDoor } from '$lib/utils/doorStyle';
+  import { doorFrameColor, isGlazedDoor, windowFrameColor, casementLightCount } from '$lib/utils/doorStyle';
   import { assembleFloorStack } from '$lib/utils/floorStack';
   import { setFloorCameraPose } from '$lib/utils/floorCamera';
   import { frameScene } from '$lib/utils/frameScene';
@@ -1251,7 +1251,9 @@
     return leaf;
   }
 
-  function addOpeningFrame(wall: Wall, position: number, width: number, bottom: number, height: number, depth: number, material: THREE.Material, excludeFromRender = false) {
+  /** Box following the wall path over [position ± width/2], `offset` cm off the wall line
+   * along its normal (for sash tracks and handles). */
+  function addOpeningFrame(wall: Wall, position: number, width: number, bottom: number, height: number, depth: number, material: THREE.Material, excludeFromRender = false, offset = 0) {
     const path = wallPathProfile(wall);
     const rect = pathOpening(path, position * path.length, width, bottom, height);
     if (!rect) return;
@@ -1261,8 +1263,9 @@
       const center = path.sample((from + to) / 2).point;
       const geo = new THREE.BoxGeometry(to - from, rect.top - rect.bottom, depth);
       const mesh = new THREE.Mesh(geo, material);
-      mesh.position.set(center.x, (rect.bottom + rect.top) / 2, center.y);
-      mesh.rotation.y = -Math.atan2(span.end.y - span.start.y, span.end.x - span.start.x);
+      const spanAngle = Math.atan2(span.end.y - span.start.y, span.end.x - span.start.x);
+      mesh.position.set(center.x - Math.sin(spanAngle) * offset, (rect.bottom + rect.top) / 2, center.y + Math.cos(spanAngle) * offset);
+      mesh.rotation.y = -spanAngle;
       mesh.userData.renderExclude = excludeFromRender;
       mesh.userData.xray = true;
       mesh.castShadow = !excludeFromRender;
@@ -1647,36 +1650,80 @@
       const effectiveWinH = opening.top - opening.bottom;
       const winCY = win.sillHeight + effectiveWinH / 2;
 
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.4, metalness: 0.1 });
-      const mullionW = 4; // mullion bar width
-
-      // Outer frame — 4 bars forming rectangle
-      const bars: { w: number; h: number; ox: number; oy: number }[] = [
-        { w: win.width + mullionW * 2, h: mullionW, ox: 0, oy: -effectiveWinH / 2 - mullionW / 2 }, // bottom
-        { w: win.width + mullionW * 2, h: mullionW, ox: 0, oy: effectiveWinH / 2 + mullionW / 2 },  // top
-        { w: mullionW, h: effectiveWinH, ox: -win.width / 2 - mullionW / 2, oy: 0 },  // left
-        { w: mullionW, h: effectiveWinH, ox: win.width / 2 + mullionW / 2, oy: 0 },   // right
-        // Center vertical mullion
-        { w: mullionW, h: effectiveWinH, ox: 0, oy: 0 },
-        // Center horizontal mullion
-        { w: win.width, h: mullionW, ox: 0, oy: 0 },
-      ];
-      for (const bar of bars) {
-        addOpeningFrame(wall, t + bar.ox / length, bar.w, winCY + bar.oy - bar.h / 2, bar.h, mullionW, frameMat);
-      }
-
-      // Glass panes (4 quadrants)
+      const frameMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(windowFrameColor(win)), roughness: 0.4, metalness: 0.1 });
       const glassMat = new THREE.MeshStandardMaterial({
         color: 0xa8d8ea, transparent: true, opacity: 0.3,
         roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide
       });
-      const halfW = (win.width - mullionW) / 2;
-      const halfH = (effectiveWinH - mullionW) / 2;
-      for (const qx of [-1, 1]) {
-        for (const qy of [-1, 1]) {
-          const ox = qx * (halfW / 2 + mullionW / 2);
-          const centerY = winCY + qy * (halfH / 2 + mullionW / 2);
-          addOpeningFrame(wall, t + ox / length, halfW, centerY - halfH / 2, halfH, 1, glassMat, true);
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.25, metalness: 0.8 });
+      const W = win.width, H = effectiveWinH, bottom = win.sillHeight;
+      // Outer frame lines the opening (face width F, depth D); everything else sits inside it.
+      const F = Math.min(6, W * 0.1, H * 0.1), D = Math.min(7, wt);
+      const iw = W - F * 2, ih = H - F * 2, ib = bottom + F;
+      const mullionW = 4; // standard window's centre mullion and transom
+      // Box `w` × `h` centred `ox` cm along the wall from the window centre, bottom at `y`.
+      const bar = (ox: number, w: number, y: number, h: number, depth: number, mat: THREE.Material, z = 0) => {
+        if (w > 0 && h > 0) addOpeningFrame(wall, t + ox / length, w, y, h, depth, mat, false, z);
+      };
+      const glass = (ox: number, w: number, y: number, h: number, z = 0) => {
+        if (w > 0 && h > 0) addOpeningFrame(wall, t + ox / length, w, y, h, 1, glassMat, true, z);
+      };
+      /** A framed glazed sash filling [x0, x0 + w] × [y0, y0 + h]. */
+      const sash = (x0: number, w: number, y0: number, h: number, depth: number, z = 0) => {
+        const s = Math.min(5, w * 0.15, h * 0.15);
+        bar(x0 + s / 2, s, y0, h, depth, frameMat, z);
+        bar(x0 + w - s / 2, s, y0, h, depth, frameMat, z);
+        bar(x0 + w / 2, w - s * 2, y0, s, depth, frameMat, z);
+        bar(x0 + w / 2, w - s * 2, y0 + h - s, s, depth, frameMat, z);
+        glass(x0 + w / 2, w - s * 2, y0 + s, h - s * 2, z);
+        return s;
+      };
+
+      // Outer frame: head, cill and jambs inside the opening
+      bar(0, W, bottom, F, D, frameMat);
+      bar(0, W, bottom + H - F, F, D, frameMat);
+      bar(-W / 2 + F / 2, F, ib, ih, D, frameMat);
+      bar(W / 2 - F / 2, F, ib, ih, D, frameMat);
+
+      if (win.type === 'fixed') {
+        // One pane, no glazing bars
+        glass(0, iw, ib, ih);
+      } else if (win.type === 'casement' || win.type === 'bay') {
+        // UK side-hung casement: one light per ~65 cm split by mullions. The end lights
+        // are opening sashes hinged on their outer edge (a two-light window opens on the
+        // left only); middle lights are fixed panes glazed into the frame.
+        const lights = casementLightCount(W);
+        const mullion = Math.min(6, F), lightW = (iw - mullion * (lights - 1)) / lights;
+        for (let i = 0; i < lights; i++) {
+          const x0 = -iw / 2 + i * (lightW + mullion);
+          if (i > 0) bar(x0 - mullion / 2, mullion, ib, ih, D, frameMat);
+          const opener = i === 0 || (i === lights - 1 && lights > 2);
+          if (!opener) { glass(x0 + lightW / 2, lightW, ib, ih); continue; }
+          // Sash sits proud of the outer frame on both faces
+          const s = sash(x0 + 0.5, lightW - 1, ib + 0.5, ih - 1, D + 1);
+          // Handle on the meeting stile, opposite the hinge, on both faces
+          const hx = i === 0 ? x0 + lightW - 0.5 - s / 2 : x0 + 0.5 + s / 2;
+          for (const face of [-1, 1]) {
+            bar(hx, 1.5, ib + ih / 2 - 3, 6, 1.5, handleMat, face * ((D + 1) / 2 + 0.75));
+            bar(hx, 1.5, ib + ih / 2 - 9, 6, 1.5, handleMat, face * ((D + 1) / 2 + 2));
+          }
+        }
+      } else if (win.type === 'sliding') {
+        // Two sashes on offset tracks, overlapping at the meeting stiles (closed)
+        const overlap = Math.min(4, iw * 0.05), sashW = iw / 2 + overlap / 2, track = Math.min(2, D / 4);
+        for (const side of [-1, 1]) {
+          const x0 = side < 0 ? -iw / 2 : iw / 2 - sashW;
+          const s = sash(x0, sashW, ib, ih, 3, side * track);
+          const meet = side < 0 ? x0 + sashW - s / 2 : x0 + s / 2;
+          bar(meet, 1.5, ib + ih / 2 - 7, 14, 1.5, handleMat, side * (track + 2.2));
+        }
+      } else {
+        // Standard: centre mullion and transom, four panes
+        bar(0, mullionW, ib, ih, D, frameMat);
+        bar(0, iw, ib + ih / 2 - mullionW / 2, mullionW, D, frameMat);
+        const halfW = (iw - mullionW) / 2, halfH = (ih - mullionW) / 2;
+        for (const qx of [-1, 1]) for (const qy of [-1, 1]) {
+          glass(qx * (halfW / 2 + mullionW / 2), halfW, ib + ih / 2 + qy * (halfH / 2 + mullionW / 2) - halfH / 2, halfH);
         }
       }
 
