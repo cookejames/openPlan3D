@@ -1,4 +1,4 @@
-import type { Door } from '$lib/models/types';
+import type { Door, Window } from '$lib/models/types';
 
 /** Glazed door types get metal-framed glass leaves in 3D. */
 export function isGlazedDoor(type: Door['type']): boolean {
@@ -14,8 +14,21 @@ export function doorFrameColor(door: Pick<Door, 'type' | 'frameColor'>): string 
   return door.frameColor ?? defaultDoorFrameColor(door.type);
 }
 
-/** Swatches offered for door frames in the properties panel; `key` names a `doorFrameColor.*` label. */
-export const DOOR_FRAME_PRESETS = [
+/** Frame colour used when a window has no `frameColor`: the White preset. */
+export const DEFAULT_WINDOW_FRAME_COLOR = '#F4F5F0';
+
+export function windowFrameColor(win: Pick<Window, 'frameColor'>): string {
+  return win.frameColor ?? DEFAULT_WINDOW_FRAME_COLOR;
+}
+
+/** Lights in a UK side-hung casement window: one per ~65 cm of width (60 cm → 1,
+ * 100–130 cm → 2, 150–195 cm → 3), capped at 6. */
+export function casementLightCount(width: number): number {
+  return Math.max(1, Math.min(6, Math.ceil(width / 65)));
+}
+
+/** Swatches offered for door and window frames; `key` names a `doorFrameColor.*` label. */
+export const FRAME_COLOR_PRESETS = [
   { key: 'AnthraciteGrey', color: '#3B3F46' },
   { key: 'Black', color: '#1A1A1A' },
   { key: 'White', color: '#F4F5F0' },
