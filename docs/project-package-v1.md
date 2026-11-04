@@ -141,6 +141,15 @@ Native focused tests and web package/category tests pass. Actual cross-platform
 UI/package height qualification and broader regression results remain tracked in
 NEXT and STATUS; the reflection qualification does not prove height qualification.
 
+## Furniture height from floor
+
+Web furniture may carry an optional `elevation` in centimetres: the height of
+its base above its floor (for example a wall cabinet). Absent means 0; values
+must be finite, from 0 to 10,000. The 3D view raises the item by this amount;
+the plan drawing is unchanged. Native furniture has no equivalent field, so the
+value stays in `web.json` and survives native returns unchanged. No package
+version change is required.
+
 ## Furniture category display contract
 
 Both web import paths share display aliases; exact web catalog IDs win over

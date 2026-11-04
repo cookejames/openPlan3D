@@ -118,9 +118,14 @@ export interface FurnitureItem {
   width?: number;   // cm
   depth?: number;   // cm
   height?: number;  // cm
+  /** Height of the item's base above its floor in cm (wall cabinets, a TV on a unit). Absent means 0. */
+  elevation?: number;
   material?: string; // material name/id
   locked?: boolean;
 }
+
+/** Upper bound for `FurnitureItem.elevation`, in cm. */
+export const MAX_FURNITURE_ELEVATION = 10000;
 
 export interface ElementGroup {
   id: string;

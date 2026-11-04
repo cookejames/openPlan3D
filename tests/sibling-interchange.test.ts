@@ -111,7 +111,9 @@ describe.each(fixtures)('%s', (name, block) => {
       expect(exported.story).toBe(story(object));
       for (let i = 0; i < 3; i++) near(exported.dimensions[i], object.dimensions[i]);
       near(exported.transform[12], object.transform[12]); near(exported.transform[14], object.transform[14]);
-      near(exported.transform[13], object.dimensions[1] / 2);
+      // A raised object (wall cabinet) keeps its height from floor; anything else stands on the floor.
+      const base = object.transform[13] - object.dimensions[1] / 2;
+      near(exported.transform[13], base >= 0.005 ? object.transform[13] : object.dimensions[1] / 2);
       near(heading(exported.transform), heading(object.transform));
       if (hasAttributes(object)) expect(exported.attributes).toEqual(object.attributes);
       else expect(exported).not.toHaveProperty('attributes');

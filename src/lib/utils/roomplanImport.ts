@@ -7,7 +7,7 @@
  */
 
 import type { Floor, Wall, Door, Window, FurnitureItem, Room, Point, Project, InterchangeState } from '$lib/models/types';
-import { INTERCHANGE_BLOCK_KEYS } from '$lib/models/types';
+import { INTERCHANGE_BLOCK_KEYS, MAX_FURNITURE_ELEVATION } from '$lib/models/types';
 import { createDefaultProject, createDefaultFloor } from '$lib/stores/project';
 import { detectRooms, getRoomPolygon } from '$lib/utils/roomDetection';
 import { COLLAPSED_WALL_LENGTH, validateRoomPlan } from './roomplanValidation';
@@ -723,6 +723,9 @@ export function importRoomPlan(jsonData: any, options: RoomPlanImportOptions = r
     // Local X supplies heading; the determinant retains the remaining Y
     // reflection, including native mirrored furniture exported without sidecars.
     const reflected = ro.transform[0] * ro.transform[10] - ro.transform[2] * ro.transform[8] < 0;
+    // Prepared files stand each floor at y = 0, so a raised object (wall cabinet, TV on a unit)
+    // keeps its base height. Raw scans have no such origin; their objects stay on the floor.
+    const elevation = jsonData.openplanPrepared ? Math.round(centimetres(pos.y - ro.dimensions[1] / 2) * 1000) / 1000 : 0;
     furniture.push({
       id: ro.identifier,
       ...importedFurnitureCategory(getCategoryKey(ro.category), centimetres(ro.dimensions[0])),
@@ -732,6 +735,7 @@ export function importRoomPlan(jsonData: any, options: RoomPlanImportOptions = r
       width: centimetres(ro.dimensions[0]),
       depth: centimetres(ro.dimensions[2]),
       height: centimetres(ro.dimensions[1]),
+      ...(elevation >= 0.5 && elevation <= MAX_FURNITURE_ELEVATION ? { elevation } : {}),
     });
   }
 
