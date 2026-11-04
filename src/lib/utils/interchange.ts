@@ -147,7 +147,7 @@ export function projectToPreparedRoomPlan(project: Project, options: { floorIds?
       objects.push({
         identifier: identifier(item.id, story),
         dimensions: [positive(metres(size.width)), height, positive(metres(size.depth))],
-        transform: transformAt(metres(item.position.x), metres(item.position.y), (item.rotation ?? 0) * Math.PI / 180, r8(height / 2), (item.scale?.x ?? 1) < 0, (item.scale?.y ?? 1) < 0),
+        transform: transformAt(metres(item.position.x), metres(item.position.y), (item.rotation ?? 0) * Math.PI / 180, r8(metres(item.elevation ?? 0) + height / 2), (item.scale?.x ?? 1) < 0, (item.scale?.y ?? 1) < 0),
         category: { [exportedFurnitureCategory(item)]: {} },
         ...(plain(attributes) ? { attributes: structuredClone(attributes) } : {}),
         story,

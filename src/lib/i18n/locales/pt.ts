@@ -840,6 +840,7 @@ export const pt = {
   "furnitureProperties.custom": "Personalizada:",
   "furnitureProperties.customColor": "Cor personalizada",
   "furnitureProperties.depth": "Profundidade",
+  "furnitureProperties.elevation": "Altura do piso",
   "furnitureProperties.material": "Material",
   "furnitureProperties.original": "Materiais originais",
   "furnitureProperties.retained": "{material} (preservado)",

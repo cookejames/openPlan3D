@@ -20,7 +20,7 @@
   import { getCatalogItem } from '$lib/utils/furnitureCatalog';
   import { projectSettings, formatLength, formatArea, parseLengthInput } from '$lib/stores/settings';
     import type { Floor, Wall, Door, Window as Win, Room, FurnitureItem, Stair, Column, RoomCategory, TextAnnotation } from '$lib/models/types';
-  import { getWallStartHeight, getWallEndHeight } from '$lib/models/types';
+  import { getWallStartHeight, getWallEndHeight, MAX_FURNITURE_ELEVATION } from '$lib/models/types';
 
   let floor = $state<Floor | null>(null);
   let selId: string | null = $state(null);
@@ -208,6 +208,12 @@
     if (!selectedFurniture) return;
     dimensionInput(e, selectedFurniture.height ?? getCatalogItem(selectedFurniture.catalogId)?.height ?? 50,
       value => updateFurniture(selectedFurniture!.id, { height: value }));
+  }
+  function onFurnitureElevation(e: Event) {
+    if (!selectedFurniture) return;
+    // Zero is the floor; store it as an absent field so untouched items stay unchanged.
+    dimensionInput(e, selectedFurniture.elevation ?? 0,
+      value => updateFurniture(selectedFurniture!.id, { elevation: value > 0 ? value : undefined }), true, MAX_FURNITURE_ELEVATION);
   }
   function onFurnitureMaterial(e: Event) {
     if (!selectedFurniture) return;
@@ -712,6 +718,15 @@
           value={displayValue(selectedFurniture.height ?? getCatalogItem(selectedFurniture.catalogId)?.height ?? 50)}
           oninput={onFurnitureHeight} onblur={onFurnitureHeight} min={settings.units === 'imperial' ? 1 / 2.54 : 1} step="any"
           class="w-full px-2 py-1 border border-gray-200 rounded text-sm" 
+        />
+      </label>
+      <label class="block">
+        <span class="text-xs text-gray-500">{$t('furnitureProperties.elevation')} ({unitLabel()})</span>
+        <input
+          type="number"
+          value={displayValue(selectedFurniture.elevation ?? 0)}
+          oninput={onFurnitureElevation} onblur={onFurnitureElevation} min="0" max={settings.units === 'imperial' ? MAX_FURNITURE_ELEVATION / 2.54 : MAX_FURNITURE_ELEVATION} step="any"
+          class="w-full px-2 py-1 border border-gray-200 rounded text-sm"
         />
       </label>
       

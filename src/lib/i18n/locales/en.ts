@@ -840,6 +840,7 @@ export const en = {
   "furnitureProperties.custom": "Custom:",
   "furnitureProperties.customColor": "Custom color",
   "furnitureProperties.depth": "Depth",
+  "furnitureProperties.elevation": "Height from floor",
   "furnitureProperties.material": "Material",
   "furnitureProperties.original": "Original materials",
   "furnitureProperties.retained": "{material} (retained)",

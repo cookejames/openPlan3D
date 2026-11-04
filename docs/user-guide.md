@@ -290,8 +290,9 @@ Plumbing, Imported) and the **Recent** row. Hovering an item shows its size
 - Right-click an item: **Duplicate**, **Rotate 90°**, **Flip Horizontal**,
   **Bring to Front**, **Send to Back**, **Lock** / **Unlock** (also Ctrl+L),
   **Properties**, **Delete**.
-- The **Properties** panel ("… Properties") has size fields, **Rotation
-  (degrees)**, **Rotate 90° left** / **right**, **Flip H** / **Flip V**,
+- The **Properties** panel ("… Properties") has size fields, **Height from
+  floor** (0 by default; raises the item in 3D, for example a wall cabinet or a
+  TV on a unit), **Rotation (degrees)**, **Rotate 90° left** / **right**, **Flip H** / **Flip V**,
   **Color** (presets and a custom colour) and **Material** (Wood, Metal,
   Fabric, Leather, Glass, Plastic, Stone, Ceramic, or "Original materials").
   "Color tints the 3D model; materials adjust its finish. Reset to defaults
