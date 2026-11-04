@@ -1656,8 +1656,11 @@
         roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide
       });
       const handleMat = new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.25, metalness: 0.8 });
-      const mullionW = 4; // outer frame and mullion bar width
       const W = win.width, H = effectiveWinH, bottom = win.sillHeight;
+      // Outer frame lines the opening (face width F, depth D); everything else sits inside it.
+      const F = Math.min(6, W * 0.1, H * 0.1), D = Math.min(7, wt);
+      const iw = W - F * 2, ih = H - F * 2, ib = bottom + F;
+      const mullionW = 4; // standard window's centre mullion and transom
       // Box `w` × `h` centred `ox` cm along the wall from the window centre, bottom at `y`.
       const bar = (ox: number, w: number, y: number, h: number, depth: number, mat: THREE.Material, z = 0) => {
         if (w > 0 && h > 0) addOpeningFrame(wall, t + ox / length, w, y, h, depth, mat, false, z);
@@ -1676,50 +1679,51 @@
         return s;
       };
 
-      // Outer frame — 4 bars forming rectangle
-      bar(0, W + mullionW * 2, bottom - mullionW, mullionW, mullionW, frameMat);
-      bar(0, W + mullionW * 2, bottom + H, mullionW, mullionW, frameMat);
-      bar(-W / 2 - mullionW / 2, mullionW, bottom, H, mullionW, frameMat);
-      bar(W / 2 + mullionW / 2, mullionW, bottom, H, mullionW, frameMat);
+      // Outer frame: head, cill and jambs inside the opening
+      bar(0, W, bottom, F, D, frameMat);
+      bar(0, W, bottom + H - F, F, D, frameMat);
+      bar(-W / 2 + F / 2, F, ib, ih, D, frameMat);
+      bar(W / 2 - F / 2, F, ib, ih, D, frameMat);
 
       if (win.type === 'fixed') {
         // One pane, no glazing bars
-        glass(0, W, bottom, H);
+        glass(0, iw, ib, ih);
       } else if (win.type === 'casement' || win.type === 'bay') {
         // UK side-hung casement: one light per ~65 cm split by mullions. The end lights
         // are opening sashes hinged on their outer edge (a two-light window opens on the
         // left only); middle lights are fixed panes glazed into the frame.
         const lights = casementLightCount(W);
-        const mullion = 5, lightW = (W - mullion * (lights - 1)) / lights;
+        const mullion = Math.min(6, F), lightW = (iw - mullion * (lights - 1)) / lights;
         for (let i = 0; i < lights; i++) {
-          const x0 = -W / 2 + i * (lightW + mullion);
-          if (i > 0) bar(x0 - mullion / 2, mullion, bottom, H, mullionW, frameMat);
+          const x0 = -iw / 2 + i * (lightW + mullion);
+          if (i > 0) bar(x0 - mullion / 2, mullion, ib, ih, D, frameMat);
           const opener = i === 0 || (i === lights - 1 && lights > 2);
-          if (!opener) { glass(x0 + lightW / 2, lightW, bottom, H); continue; }
-          const s = sash(x0 + 1, lightW - 2, bottom + 1, H - 2, mullionW + 1);
+          if (!opener) { glass(x0 + lightW / 2, lightW, ib, ih); continue; }
+          // Sash sits proud of the outer frame on both faces
+          const s = sash(x0 + 0.5, lightW - 1, ib + 0.5, ih - 1, D + 1);
           // Handle on the meeting stile, opposite the hinge, on both faces
-          const hx = i === 0 ? x0 + lightW - 1 - s / 2 : x0 + 1 + s / 2;
+          const hx = i === 0 ? x0 + lightW - 0.5 - s / 2 : x0 + 0.5 + s / 2;
           for (const face of [-1, 1]) {
-            bar(hx, 1.5, bottom + H / 2 - 3, 6, 1.5, handleMat, face * (mullionW / 2 + 1.5));
-            bar(hx, 1.5, bottom + H / 2 - 9, 6, 1.5, handleMat, face * (mullionW / 2 + 2.5));
+            bar(hx, 1.5, ib + ih / 2 - 3, 6, 1.5, handleMat, face * ((D + 1) / 2 + 0.75));
+            bar(hx, 1.5, ib + ih / 2 - 9, 6, 1.5, handleMat, face * ((D + 1) / 2 + 2));
           }
         }
       } else if (win.type === 'sliding') {
         // Two sashes on offset tracks, overlapping at the meeting stiles (closed)
-        const overlap = Math.min(4, W * 0.05), sashW = W / 2 + overlap / 2, track = 2;
+        const overlap = Math.min(4, iw * 0.05), sashW = iw / 2 + overlap / 2, track = Math.min(2, D / 4);
         for (const side of [-1, 1]) {
-          const x0 = side < 0 ? -W / 2 : W / 2 - sashW;
-          const s = sash(x0, sashW, bottom, H, 3, side * track);
+          const x0 = side < 0 ? -iw / 2 : iw / 2 - sashW;
+          const s = sash(x0, sashW, ib, ih, 3, side * track);
           const meet = side < 0 ? x0 + sashW - s / 2 : x0 + s / 2;
-          bar(meet, 1.5, bottom + H / 2 - 7, 14, 1.5, handleMat, side * (track + 2.2));
+          bar(meet, 1.5, ib + ih / 2 - 7, 14, 1.5, handleMat, side * (track + 2.2));
         }
       } else {
         // Standard: centre mullion and transom, four panes
-        bar(0, mullionW, bottom, H, mullionW, frameMat);
-        bar(0, W, bottom + H / 2 - mullionW / 2, mullionW, mullionW, frameMat);
-        const halfW = (W - mullionW) / 2, halfH = (H - mullionW) / 2;
+        bar(0, mullionW, ib, ih, D, frameMat);
+        bar(0, iw, ib + ih / 2 - mullionW / 2, mullionW, D, frameMat);
+        const halfW = (iw - mullionW) / 2, halfH = (ih - mullionW) / 2;
         for (const qx of [-1, 1]) for (const qy of [-1, 1]) {
-          glass(qx * (halfW / 2 + mullionW / 2), halfW, winCY + qy * (halfH / 2 + mullionW / 2) - halfH / 2, halfH);
+          glass(qx * (halfW / 2 + mullionW / 2), halfW, ib + ih / 2 + qy * (halfH / 2 + mullionW / 2) - halfH / 2, halfH);
         }
       }
 
