@@ -15,6 +15,7 @@ import { readProject } from '$lib/utils/projectValidation';
 import { mergeRoomPlanFloors, selectableContentIds, type AddedContent } from '$lib/utils/roomplanMerge';
 import { doorJoin } from '$lib/utils/scanAlignment';
 import { readOnly } from '$lib/stores/readOnly';
+import { defaultWallHeight } from '$lib/stores/settings';
 
 
 function uid(): string {
@@ -326,10 +327,11 @@ const samePoint = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 
 export function addWall(start: Point, end: Point): string {
   const id = uid();
+  const height = defaultWallHeight();
   mutate((f) => {
     // Copy the coordinates: the canvas passes magnet-snap results (with snappedTo* flags) and
     // reuses one point for the next wall's start; the model keeps plain, independent points.
-    f.walls.push({ id, start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y }, thickness: 15, height: 280, startHeight: 280, endHeight: 280, color: '#444444' });
+    f.walls.push({ id, start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y }, thickness: 15, height, startHeight: height, endHeight: height, color: '#444444' });
   }, 'Added wall');
   if (typeof window !== 'undefined') {
     import('$lib/stores/onboarding.svelte').then(m => m.triggerTip('first-wall', end.x > 400 ? 300 : end.x + 20, 120)).catch(() => {});
