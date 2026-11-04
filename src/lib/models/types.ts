@@ -46,6 +46,20 @@ export function validWallHeight(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+/** Height in cm that new walls get in a project without its own Default wall height. */
+export const DEFAULT_WALL_HEIGHT = 280;
+
+/** A usable project Default wall height: a finite wall height above zero. */
+export function validDefaultWallHeight(value: unknown): value is number {
+  return validWallHeight(value) && value > 0;
+}
+
+/** Height in cm for a wall newly drawn in `project`; absent or unusable values use 280 cm. */
+export function projectDefaultWallHeight(project: Pick<Project, 'defaultWallHeight'> | null | undefined): number {
+  const height = project?.defaultWallHeight;
+  return validDefaultWallHeight(height) ? height : DEFAULT_WALL_HEIGHT;
+}
+
 export function getWallStartHeight(wall: Wall): number {
   return validWallHeight(wall.startHeight) ? wall.startHeight : validWallHeight(wall.height) ? wall.height : 280;
 }
@@ -290,4 +304,6 @@ export interface Project {
   createdAt: Date;
   updatedAt: Date;
   customEntourage?: CustomEntourageDef[];
+  /** Height in cm given to walls drawn from now on in this project; absent means 280. Existing walls keep their own heights. */
+  defaultWallHeight?: number;
 }

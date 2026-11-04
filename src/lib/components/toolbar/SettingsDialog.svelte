@@ -2,10 +2,10 @@
   import { onDestroy } from 'svelte';
   import { locale, t, type Locale, type TranslationKey } from '$lib/i18n';
   import { modalDialog } from '$lib/utils/modalDialog';
-  import { DEFAULT_WALL_HEIGHT, parseLengthInput, projectSettings, validDefaultWallHeight } from '$lib/stores/settings';
+  import { projectSettings } from '$lib/stores/settings';
   import type { ProjectSettings } from '$lib/stores/settings';
-  import { currentProject, updateProjectDescription, updateProjectName } from '$lib/stores/project';
-  import type { Project } from '$lib/models/types';
+  import { currentProject, updateProjectDefaultWallHeight, updateProjectDescription, updateProjectName } from '$lib/stores/project';
+  import { DEFAULT_WALL_HEIGHT, projectDefaultWallHeight, validDefaultWallHeight, type Project } from '$lib/models/types';
   import { themePreference, type ThemePreference } from '$lib/stores/theme';
   import { getGeminiKey, setGeminiKey } from '$lib/stores/aiKeys';
   import OpenAISettings from '$lib/components/ai/OpenAISettings.svelte';
@@ -73,7 +73,6 @@
     snapStep: 'grid',
     snapToWalls: true,
     gridSize: 25,
-    defaultWallHeight: DEFAULT_WALL_HEIGHT,
   });
 
   onDestroy(projectSettings.subscribe((s) => { settings = { ...s }; }));
@@ -83,19 +82,11 @@
     projectSettings.set({ ...settings });
   }
 
-  // Shown in the unit system's input unit (cm or in), like the wall height fields in Properties.
-  function wallHeightDisplay(cm: number): number {
-    return settings.units === 'imperial' ? Math.round(cm / 2.54 * 10) / 10 : Math.round(cm * 1000) / 1000;
-  }
-
-  /** Commit a typed Default wall height; blank or invalid entries restore the saved value. */
-  function onDefaultWallHeight(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const parsed = parseLengthInput(input.value, settings.units);
-    if (validDefaultWallHeight(parsed) && input.value.trim() !== String(wallHeightDisplay(settings.defaultWallHeight))) {
-      updateSetting('defaultWallHeight', parsed);
-    }
-    input.value = String(wallHeightDisplay(settings.defaultWallHeight));
+  /** Like the slab thickness fields: valid cm values apply as typed; blank or invalid entries restore the project's value on blur. */
+  function editDefaultWallHeight(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    if (validDefaultWallHeight(input.valueAsNumber)) updateProjectDefaultWallHeight(input.valueAsNumber);
+    else if (event.type === 'blur') input.value = String(projectDefaultWallHeight($currentProject));
   }
 
   function close() {
@@ -169,6 +160,23 @@
               ></textarea>
             </label>
             <FloorElevations />
+            {#if $currentProject}
+              <section aria-label={$t('settings.defaultWallHeightTitle')} class="space-y-1 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <label class="block text-sm text-gray-700 dark:text-gray-300">
+                  {$t('settings.defaultWallHeight')}
+                  <input type="number" min="0.01" step="any" value={projectDefaultWallHeight($currentProject)} aria-describedby="default-wall-height-help"
+                    oninput={editDefaultWallHeight} onblur={editDefaultWallHeight}
+                    class="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100" />
+                </label>
+                <p id="default-wall-height-help" class="text-xs text-gray-500 dark:text-gray-400">{$t('settings.defaultWallHeightHelp')}</p>
+                <button type="button" disabled={$currentProject.defaultWallHeight === undefined}
+                  aria-label={$t('settings.resetDefaultWallHeight')}
+                  onclick={() => updateProjectDefaultWallHeight()}
+                  class="text-xs text-blue-700 dark:text-blue-300 underline disabled:text-gray-400 disabled:no-underline">
+                  {$t('floors.default', { value: DEFAULT_WALL_HEIGHT })}
+                </button>
+              </section>
+            {/if}
           </div>
 
         {:else if activeTab === 'dimensions'}
@@ -216,19 +224,6 @@
             </div>
           </div>
 
-          <!-- Height given to newly drawn walls -->
-          <label class="flex items-center justify-between gap-4 mb-1">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{$t('settings.defaultWallHeight', { unit: settings.units === 'imperial' ? 'in' : 'cm' })}</span>
-            <input
-              type="text"
-              inputmode="decimal"
-              value={wallHeightDisplay(settings.defaultWallHeight)}
-              onblur={onDefaultWallHeight}
-              onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-              class="w-24 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-right bg-white dark:bg-gray-700 dark:text-gray-100"
-            />
-          </label>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mb-5">{$t('settings.defaultWallHeightHelp')}</p>
 
           <!-- Toggle options -->
           <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl divide-y divide-gray-200 dark:divide-gray-600">

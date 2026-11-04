@@ -1,5 +1,5 @@
 import type { Project, DetailKind } from '$lib/models/types';
-import { MAX_FURNITURE_ELEVATION } from '$lib/models/types';
+import { MAX_FURNITURE_ELEVATION, validDefaultWallHeight } from '$lib/models/types';
 import { validateItemDetails, validateRetainedDetailState } from './itemDetails';
 import { refreshLegacyFurnitureCategories } from './legacyFurnitureCategories';
 import { validateCustomModelDefinitions } from './customModelDefinitions';
@@ -54,6 +54,8 @@ export function readProject(value: unknown): Project {
   text(project!.id, 'id', true);
   defaults(project!, { name: 'Untitled Project' });
   text(project!.name, 'name'); strings(project!, ['description'], 'document');
+  // An unusable Default wall height is dropped rather than rejecting the plan: new walls then use 280 cm.
+  if (project!.defaultWallHeight !== undefined && !validDefaultWallHeight(project!.defaultWallHeight)) delete project!.defaultWallHeight;
   if (project!.projectPackage !== undefined) validateRetainedDetailState(project!.projectPackage);
   const customModelIds = validateCustomModelDefinitions(project!.customModels, project!.projectPackage?.assets);
   if (project!.attachmentNames !== undefined) {
