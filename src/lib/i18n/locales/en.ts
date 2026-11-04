@@ -50,6 +50,8 @@ export const en = {
   "settings.createSecretKeyStep": "Click \"Create new secret key\"",
   "settings.wallSnap": "Wall snapping",
   "settings.wallSnapHelp": "Furniture automatically aligns its back edge with nearby walls",
+  "settings.defaultWallHeight": "Default wall height ({unit})",
+  "settings.defaultWallHeightHelp": "Height given to walls you draw from now on. Existing walls keep their height.",
   "floors.title": "Floor elevations",
   "floors.help": "Set each floor's height above ground for stacked 3D. Use negative values for basements. Wall heights and other floors stay unchanged. Defaults are 300 cm apart.",
   "floors.elevation": "{name} elevation (cm)",

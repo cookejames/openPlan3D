@@ -29,7 +29,7 @@
   import { roomTemplates, placeRoomTemplate } from '$lib/utils/roomTemplates';
   import { openingDropTarget } from '$lib/utils/openingDrop';
   import { getWallTextureCanvas, getFloorTextureCanvas, setTextureLoadCallback } from '$lib/utils/textureGenerator';
-  import { projectSettings, formatLength, formatArea } from '$lib/stores/settings';
+  import { projectSettings, formatLength, formatArea, DEFAULT_WALL_HEIGHT } from '$lib/stores/settings';
   import type { ProjectSettings, SnapStep } from '$lib/stores/settings';
   import { snapStatus, cycleSnapStep } from '$lib/utils/snapStep';
   import { angleSnapWithin, resizeFurnitureFromHandle, snap as _snap, type CanvasState } from '$lib/utils/canvasInteraction';
@@ -158,6 +158,7 @@
     showInternalDimensions: false, showExtensionLines: true,
     showObjectDistance: true, dimensionLineColor: '#1e293b',
     wallMeasureMode: 'centerline', snapToGrid: true, snapStep: 'grid', snapToWalls: true, gridSize: 25,
+    defaultWallHeight: DEFAULT_WALL_HEIGHT,
   });
   onDestroy(projectSettings.subscribe((s) => {
     dimSettings = s;

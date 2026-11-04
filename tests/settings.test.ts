@@ -79,4 +79,31 @@ describe('editor settings', () => {
     vi.resetModules();
     expect(get(await load())).toMatchObject({ snapToGrid: false, units: 'imperial' });
   });
+
+  it('defaults the wall height to 280 cm, including for settings saved before it existed', async () => {
+    expect(get(await load()).defaultWallHeight).toBe(280);
+    vi.resetModules();
+    mockStorage().set('o3d_settings', JSON.stringify({ units: 'imperial', snapToGrid: true }));
+    expect(get(await load())).toMatchObject({ units: 'imperial', defaultWallHeight: 280 });
+  });
+
+  it('ignores an unusable saved wall height', async () => {
+    for (const defaultWallHeight of [0, -10, 'tall', null]) {
+      vi.resetModules();
+      mockStorage().set('o3d_settings', JSON.stringify({ defaultWallHeight }));
+      expect(get(await load()).defaultWallHeight).toBe(280);
+    }
+  });
+
+  it('remembers the wall height across reloads and resets it', async () => {
+    const data = mockStorage();
+    const settings = await load();
+    settings.set({ ...get(settings), defaultWallHeight: 245 });
+    expect(JSON.parse(data.get('o3d_settings')!)).toMatchObject({ defaultWallHeight: 245 });
+    vi.resetModules();
+    const reloaded = await load();
+    expect(get(reloaded).defaultWallHeight).toBe(245);
+    reloaded.reset();
+    expect(get(reloaded).defaultWallHeight).toBe(280);
+  });
 });

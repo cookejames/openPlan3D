@@ -50,6 +50,8 @@ export const pt = {
   "settings.createSecretKeyStep": "Clique em \"Create new secret key\"",
   "settings.wallSnap": "Ajuste às paredes",
   "settings.wallSnapHelp": "Os móveis alinham automaticamente a parte traseira com as paredes próximas",
+  "settings.defaultWallHeight": "Altura padrão das paredes ({unit})",
+  "settings.defaultWallHeightHelp": "Altura aplicada às paredes que desenhar a partir de agora. As paredes existentes mantêm a altura.",
   "floors.title": "Elevações dos pisos",
   "floors.help": "Defina a altura de cada piso em relação ao solo para a visualização 3D em camadas. Use valores negativos para subsolos. As alturas das paredes e dos outros pisos permanecem iguais. O espaçamento padrão é de 300 cm.",
   "floors.elevation": "Elevação de {name} (cm)",
