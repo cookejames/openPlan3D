@@ -23,6 +23,8 @@ test('straight-wall baseboards stop at doorways and floor-level windows, as curv
   test.slow();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+  await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
   await page.goto('/editor');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const chooser = page.waitForEvent('filechooser');

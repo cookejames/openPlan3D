@@ -26,6 +26,8 @@ for (const width of [1440,390]) {
     const upper = { ...structuredClone(lower), id: 'upper',name: 'Upper Floor',level: 1,stairs: [] };
     lower.textAnnotations = [{ id: 'invisible',text: 'Not in the reference layer',x: 2_000_000,y: 0,fontSize: 20,rotation: 0,color: '#cc22cc' }];
     plan.floors.push(upper); plan.activeFloorId = upper.id;
+    // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+    await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
     await page.goto('/editor');
     await page.getByRole('button', { name: 'Export',exact: true }).click();
     const chooser = page.waitForEvent('filechooser');

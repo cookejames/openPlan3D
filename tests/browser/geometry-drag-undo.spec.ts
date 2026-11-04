@@ -24,6 +24,8 @@ for (const kind of ['stair','column','text','endpoint','parallel','curve','room'
       {id:'b',text:'Map B',x:500,y:-500,fontSize:10,rotation:0,color:'#555555'},
       {id:'t',text:'Drag note',x:120,y:100,fontSize:16,rotation:0,color:'#cc22cc'}];
     if (kind==='curve') floor.walls[0].curvePoint={x:300.25,y:-100};
+    // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+    await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
     await page.goto('/editor');
     await page.getByRole('button',{name:'Export',exact:true}).click();
     const chooser=page.waitForEvent('filechooser');

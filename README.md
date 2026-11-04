@@ -130,12 +130,15 @@ npm run test:browser
 GitHub Actions runs these checks for pull requests and pushes to `main`.
 The regression suite covers local storage failures, autosave status, room metadata
 and exports, and keyboard tools. Use `npm run test:watch` while working on a fix.
-Production-browser CI runs the same regression suite in Chromium, Firefox and
-WebKit, covering import/edit/undo/save/reload/export, damaged-file recovery,
-iPhone project packages, photos, catalog loading, 3D and cold/warm asset transfers.
-Each engine runs in a separate job against the same production build, with an
-isolated Node server and analytics/cloud uploads disabled. The final `check` job
-requires the build, every browser job and the rendering benchmark assertions to pass. Engine-specific failure
+Production-browser CI runs the regression suite in Chromium, covering
+import/edit/undo/save/reload/export, damaged-file recovery, iPhone project packages,
+photos, catalog loading, 3D and cold/warm asset transfers. Firefox and WebKit are
+opt-in: set the repository variable `CI_BROWSERS` to `["chromium","firefox","webkit"]`
+to run every engine on each push, or run the Web checks workflow manually with
+`engines: all` for a one-off check. Each engine runs in six shards against the same
+production build, with an isolated Node server and analytics/cloud uploads disabled.
+The final `check` job requires the build, static checks, unit tests, every browser
+job and the rendering benchmark assertions to pass. Engine-specific failure
 screenshots/traces and HTML reports are retained for seven days; the shared build
 expires after one day. To run one engine, use
 `npm run test:browser -- --project=firefox` (or `chromium` / `webkit`).

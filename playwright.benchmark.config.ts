@@ -11,6 +11,8 @@ export default defineConfig({ ...common,
   // The large software-rendered scene took almost three minutes in calibration.
   // Leave per-case headroom; the suite/job limits still bound a stalled runner.
   timeout: 240_000, retries: 0,
+  // One measurement at a time: a second browser would share the CPU and skew timings.
+  fullyParallel: false, workers: 1,
   expect: { timeout: 60_000 },
   reporter: [['list']],
   projects: [

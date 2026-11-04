@@ -1,14 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createTestAIProvider, type ProviderRequest } from '../fixtures/ai-provider';
 import { readFile } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 
 // Settings, three render outcomes, downloads and reload include software GPU work.
 test.describe.configure({ timeout: 360_000 });
 
-const providerURL = 'http://127.0.0.1:4199';
+// Each worker runs its own provider on a free port, so parallel workers never collide.
+let providerURL = '';
 let requests: ProviderRequest[] = [];
 const provider = createTestAIProvider(request => requests.push(request));
-test.beforeAll(async () => { await new Promise<void>(resolve => provider.listen(4199, '127.0.0.1', resolve)); });
+test.beforeAll(async () => {
+  await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
+  providerURL = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`;
+});
 test.afterAll(async () => { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); });
 test.beforeEach(() => { requests = []; });
 

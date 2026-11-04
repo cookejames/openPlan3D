@@ -4,6 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      engines:
+        description: Browser engines to test
+        type: choice
+        default: configured
+        options: [configured, all]
+
+# A new push to a pull request supersedes its running checks. Runs on main
+# always finish, because Deploy waits for them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -24,10 +37,6 @@ jobs:
         env:
           NODE_ENV: production
           NPM_CONFIG_INCLUDE: dev
-      - run: npm run catalog:check
-      - run: npm audit --audit-level=high
-      - run: npm run check
-      - run: npm test
       - run: npm run build
       - name: Production build for all browser engines
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -37,6 +46,28 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Static checks and unit tests run beside the build so browser jobs only wait
+  # for the production bundle they test.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+        env:
+          NODE_ENV: production
+          NPM_CONFIG_INCLUDE: dev
+      - run: npm run catalog:check
+      - run: npm audit --audit-level=high
+      - run: npm run check
+      - run: npm test
+
   browser:
     needs: build
     runs-on: ubuntu-latest
@@ -44,10 +75,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        # Chromium by default. Set the repository variable CI_BROWSERS to
+        # ["chromium","firefox","webkit"] to test every engine on each run, or
+        # run this workflow manually with engines: all for a one-off check.
+        browser: ${{ fromJSON(inputs.engines == 'all' && '["chromium","firefox","webkit"]' || vars.CI_BROWSERS || '["chromium"]') }}
         # Each engine has hundreds of cases; keep the complete suite within
         # the existing per-job limit without dropping tests or assertions.
         shard: [1, 2, 3, 4, 5, 6]
+    # Browsers and their system libraries come preinstalled in the image that
+    # matches @playwright/test; update the tag and digest together with it.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      # Firefox refuses to run as root under a HOME owned by another user.
+      env:
+        HOME: /root
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -64,7 +105,6 @@ jobs:
         with:
           name: browser-build
           path: build/
-      - run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Chromium and WebKit regressions
         if: matrix.browser != 'firefox'
         run: npm run test:browser -- --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/6
@@ -91,6 +131,10 @@ jobs:
       fail-fast: false
       matrix:
         profile: [desktop, phone-viewport]
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      env:
+        HOME: /root
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -107,7 +151,6 @@ jobs:
         with:
           name: browser-build
           path: build/
-      - run: npx playwright install --with-deps chromium
       - run: npm run benchmark:viewer -- --project=${{ matrix.profile }}
       - name: Rendering measurements and failure evidence
         if: ${{ !cancelled() }}
@@ -121,13 +164,14 @@ jobs:
   # engine, and a failed/skipped dependency must not silently pass this job.
   check:
     if: ${{ always() }}
-    needs: [build, browser, benchmark]
+    needs: [build, verify, browser, benchmark]
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
       - name: Require build and all browser checks
         env:
           BUILD_RESULT: ${{ needs.build.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
           BROWSER_RESULT: ${{ needs.browser.result }}
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
-        run: test "$BUILD_RESULT" = success && test "$BROWSER_RESULT" = success && test "$BENCHMARK_RESULT" = success
+        run: test "$BUILD_RESULT" = success && test "$VERIFY_RESULT" = success && test "$BROWSER_RESULT" = success && test "$BENCHMARK_RESULT" = success
