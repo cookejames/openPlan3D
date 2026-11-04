@@ -10,6 +10,8 @@ test('top-down fits every corner after orbit, stacking and viewport changes', as
   page.on('request', request => {
     if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== 'http://127.0.0.1:4188') external.push(request.url());
   });
+  // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+  await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
   await page.goto('/editor');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const chooser = page.waitForEvent('filechooser');

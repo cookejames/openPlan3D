@@ -24,6 +24,8 @@ for (const width of [1440, 390]) for (const kind of ['l-shaped', 'u-shaped']) {
     const floor = plan.floors[0];
     for (const key of ['walls','doors','windows','rooms','furniture']) floor[key] = [];
     floor.stairs = [{ id: 's', position: { x: 9000, y: -8000 }, width: 100, depth: 900, rotation: 30, stairType: kind, riserCount: 14, direction: 'up' }];
+    // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+    await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
     await page.goto('/editor');
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     const chooser = page.waitForEvent('filechooser');

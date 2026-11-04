@@ -7,8 +7,12 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   // Needs the Firebase emulators: run with `npm run test:e2e:cloud`.
   testIgnore: '**/cloud-sync.spec.ts',
-  fullyParallel: false,
-  workers: 1,
+  // Shard by test, not by file: file-level shards put every heavy 3D spec
+  // (stair-*, viewer-*, walkthrough, wall-*) into the last alphabetical shard.
+  fullyParallel: true,
+  // CI runners for this public repository have four vCPUs; software WebGL
+  // leaves room for two browsers at once.
+  workers: process.env.CI ? 2 : 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   // Finish with reports before the job's 15-minute limit, even if a runner

@@ -73,6 +73,8 @@ async function openWalkthrough(page: Page, pointerLock = false, locale = 'en') {
       document.exitPointerLock = () => { locked = null; document.dispatchEvent(new Event('pointerlockchange')); };
     } else HTMLCanvasElement.prototype.requestPointerLock = () => Promise.reject(new DOMException('Denied', 'NotAllowedError'));
   }, pointerLock);
+  // Seen tips stay closed, so no tip covers the plan or waits out its eight-second auto-dismiss.
+  await page.addInitScript(() => localStorage.setItem('o3d_tips_seen', JSON.stringify(['first-wall', 'first-furniture', 'first-3d', 'first-export', 'first-door'])));
   await page.goto('/editor');
   await page.getByRole('button', { name: locale === 'pt' ? 'Exportar' : 'Export', exact: true }).click();
   const chooser = page.waitForEvent('filechooser');
