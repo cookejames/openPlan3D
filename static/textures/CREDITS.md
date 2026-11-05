@@ -26,4 +26,14 @@ All textures from [ambientCG](https://ambientcg.com/) — CC0 1.0 Universal (Pub
 - `floor-slate.webp` — Rock030 (1K Color)
 - `floor-vinyl.webp` — WoodFloor024 (1K Color)
 
+
+## Landscape Textures
+- `landscape-grass.webp` — Grass001 (1K Color)
+- `landscape-tarmac.webp` — Asphalt010 (1K Color)
+- `landscape-gravel.webp` — Gravel022 (1K Color)
+- `landscape-soil.webp` — Ground048 (1K Color)
+- `landscape-sandstone.webp` — PavingStones133 (1K Color)
+
+Concrete landscape areas reuse `floor-concrete.webp`.
+
 Distributed as WebP at the original pixel dimensions, encoded with `cwebp -q 82 -m 6 -metadata none`. Source artwork and licenses are unchanged.

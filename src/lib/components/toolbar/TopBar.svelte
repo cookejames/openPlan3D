@@ -486,6 +486,19 @@
   </div>
   {/if}
 
+  <!-- Landscaping visibility toggle (2D and 3D) -->
+  <button
+    onclick={() => layerVisibility.update(v => ({ ...v, landscape: !v.landscape }))}
+    class="p-1.5 rounded transition-colors max-xl:hidden {$layerVisibility.landscape ? 'text-white bg-white/20' : 'text-white/40 hover:text-white/70 hover:bg-white/10'}"
+    title={`${$t('toolbarView.toggleLandscape')} (${$layerVisibility.landscape ? $t('toolbarView.visible') : $t('toolbarView.hidden')})`}
+    aria-label={$t('toolbarView.toggleLandscape')}
+    aria-pressed={$layerVisibility.landscape}
+  >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 20h20"/><path d="M7 20v-4"/><path d="M7 16c-2.5 0-4-2-4-4 2 0 4 1.5 4 4zm0 0c2.5 0 4-2 4-4-2 0-4 1.5-4 4z"/><path d="M16 20l2-6 3 6"/>
+    </svg>
+  </button>
+
   <!-- Furniture visibility toggle -->
   <button
     onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))}
@@ -608,6 +621,7 @@
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => panMode.update(v => !v)}>{$panMode ? '✓ ' : ''}{$t('toolbarView.pan')}</button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-pressed={$snapEnabled} onclick={() => snapEnabled.update(v => !v)}>{$snapEnabled ? '✓ ' : ''}{$t('toolbarView.snap')}</button>
           <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))}>{$showFurnitureStore ? '✓ ' : ''}{$t('toolbarView.showFurniture')}</button>
+          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-pressed={$layerVisibility.landscape} onclick={() => layerVisibility.update(v => ({ ...v, landscape: !v.landscape }))}>{$layerVisibility.landscape ? '✓ ' : ''}{$t('toolbarView.showLandscape')}</button>
           {#if onToggleLayers}
             <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" aria-pressed={layersOpen} onclick={() => { onToggleLayers?.(); moreOpen = false; }}>{$t('layers.title')}</button>
           {/if}

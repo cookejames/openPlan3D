@@ -24,3 +24,13 @@ export const floorTextureFiles: Readonly<Record<string, string>> = {
   'slate': 'floor-slate.webp',
   'vinyl': 'floor-vinyl.webp',
 };
+
+/** Ground surfaces of the landscaping layer; keyed by LandscapeSurface. */
+export const landscapeTextureFiles: Readonly<Record<string, string>> = {
+  'grass': 'landscape-grass.webp',
+  'tarmac': 'landscape-tarmac.webp',
+  'gravel': 'landscape-gravel.webp',
+  'soil': 'landscape-soil.webp',
+  'concrete': 'floor-concrete.webp',
+  'sandstone': 'landscape-sandstone.webp',
+};

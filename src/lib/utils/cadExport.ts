@@ -19,6 +19,7 @@ import type { Project } from '$lib/models/types';
 import { getCatalogItem, getFurnitureSize } from '$lib/utils/furnitureCatalog';
 import { resolveRooms, getRoomPolygon, roomLabelPosition } from '$lib/utils/roomDetection';
 import { roomHoles } from './roomNesting';
+import { landscapeLabelPosition } from './landscapeRenderer';
 import { projectSettings, formatArea, formatLength } from '$lib/stores/settings';
 import { currentPlanExportVisibility } from '$lib/stores/planVisibility';
 import { visibleActiveFloor, type PlanExportVisibility } from './exportVisibility';
@@ -41,6 +42,11 @@ const LAYER_COLORS = {
   FURNITURE: 3,   // green
   DIMENSIONS: 8,  // gray
   ROOMS: 4,       // cyan
+};
+
+/** One layer per landscape surface, so a CAD user can hatch or restyle each surface at once. */
+const LANDSCAPE_LAYER_COLORS: Record<string, number> = {
+  grass: 94, tarmac: 250, gravel: 252, soil: 32, concrete: 8, sandstone: 41,
 };
 
 /** Plan (screen) radians to DXF degrees in [0, 360). */
@@ -74,6 +80,19 @@ export function exportDXF(project: Project, language: Locale = 'en', visibility:
   d.addLayer('FURNITURE', LAYER_COLORS.FURNITURE, 'CONTINUOUS');
   d.addLayer('DIMENSIONS', LAYER_COLORS.DIMENSIONS, 'CONTINUOUS');
   d.addLayer('ROOMS', LAYER_COLORS.ROOMS, 'CONTINUOUS');
+
+  // Landscaping: a closed outline per area, with its name, on the surface's own layer.
+  for (const area of floor.landscape ?? []) {
+    if (area.points.length < 3) continue;
+    const layer = `LANDSCAPE_${area.surface.toUpperCase()}`;
+    if (!d.layers[layer]) d.addLayer(layer, LANDSCAPE_LAYER_COLORS[area.surface] ?? 3, 'CONTINUOUS');
+    d.setActiveLayer(layer);
+    d.drawPolyline(area.points.map(p => [p.x, -p.y]), true);
+    if (area.name?.trim()) {
+      const c = landscapeLabelPosition(area);
+      d.drawText(c.x, -c.y, 8, 0, cadText(area.name), 'center', 'middle');
+    }
+  }
 
   // Draw rooms (labels)
   d.setActiveLayer('ROOMS');

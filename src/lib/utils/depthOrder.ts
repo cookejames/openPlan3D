@@ -9,6 +9,8 @@ export const DEPTH_ORDER = {
   furniture: -2,
   roomFloor: -1,
   openingFrame: -1,
+  /** Landscaping lies under room floors and over the base plane and ground. */
+  landscape: 0,
   interiorWall: 1,
   slab: 1,
   basePlane: 1,

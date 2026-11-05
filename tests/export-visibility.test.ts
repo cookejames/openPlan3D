@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 afterEach(() => { projectSettings.set(previousSettings); layerVisibility.set(previousLayers); });
 
-const defaults = { walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, entourage: true,
+const defaults = { walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, entourage: true, landscape: true,
   measurements: true, annotations: true, textAnnotations: true, roomLabels: true };
 const defaultDimensions = { showDimensions: true, showExternalDimensions: true, showInternalDimensions: false };
 
@@ -184,4 +184,48 @@ it('prints room width × depth only while automatic dimensions and Internal Dime
   expect(printed()).toContain('4 m × 3 m');
   projectSettings.update(s => ({ ...s, showDimensions: false }));
   expect(printed().some(text => text.includes(' × '))).toBe(false);
+});
+
+it('draws landscaping in the SVG export only while its layer is shown', async () => {
+  const project = shellProject();
+  project.floors[0].landscape = [{ id: 'lawn', surface: 'grass', points: [{ x: -300, y: -300 }, { x: 0, y: -300 }, { x: 0, y: 0 }, { x: -300, y: 0 }] }];
+  exportAsSVG(project);
+  const shown = await downloaded.at(-1)!.text();
+  expect(shown).toContain('data-landscape="lawn"');
+  expect(shown).toMatch(/viewBox="0 0 (\d+(\.\d+)?) /);
+  exportAsSVG(project, 'en', planExportVisibility({ ...defaults, landscape: false }, defaultDimensions));
+  expect(await downloaded.at(-1)!.text()).not.toContain('data-landscape');
+});
+
+it('draws named landscaping in every plan export only while its layer is shown', async () => {
+  const project = shellProject();
+  project.floors[0].landscape = [{ id: 'lawn', name: 'Back lawn', surface: 'grass', points: [{ x: -300, y: -300 }, { x: 0, y: -300 }, { x: 0, y: 0 }, { x: -300, y: 0 }] }];
+  const shown = await exportedText(project);
+  for (const texts of Object.values(shown)) expect(texts).toContain('Back lawn');
+  exportDXF(project);
+  const dxf = await downloaded.at(-1)!.text();
+  expect(dxf).toContain('LANDSCAPE_GRASS');
+  layerVisibility.update(v => ({ ...v, landscape: false }));
+  const hidden = await exportedText(project);
+  for (const texts of Object.values(hidden)) expect(texts).not.toContain('Back lawn');
+  exportDXF(project);
+  expect(await downloaded.at(-1)!.text()).not.toContain('LANDSCAPE_GRASS');
+});
+
+it('exports a floor holding only landscaping, framed on its areas', async () => {
+  const project = roomProject(), floor = project.floors[0];
+  Object.assign(floor, { walls: [], rooms: [], doors: [], windows: [], furniture: [], stairs: [], columns: [], measurements: [], annotations: [], textAnnotations: [] });
+  floor.landscape = [{ id: 'drive', name: 'Drive', surface: 'tarmac', points: [{ x: 1000, y: 1000 }, { x: 1300, y: 1000 }, { x: 1300, y: 1600 }, { x: 1000, y: 1600 }] }];
+  expect(exportDXF(project)).toBe(true);
+  const lines = (await downloaded.at(-1)!.text()).trim().split(/\r?\n/).map(line => line.trim());
+  // The closed outline is one LWPOLYLINE with four vertices on the surface layer.
+  const start = lines.findIndex((line, i) => line === 'LWPOLYLINE' && lines.slice(i, i + 12).includes('LANDSCAPE_TARMAC'));
+  expect(start).toBeGreaterThan(-1);
+  expect(lines[lines.indexOf('90', start) + 1]).toBe('4');
+  expect(exportAsSVG(project)).toBe(true);
+  expect(await downloaded.at(-1)!.text()).toMatch(/viewBox="0 0 400 700"/);
+  const layout = renderPrintPage(canvas, project, { pageSize: 'a4', orientation: 'portrait', scale: 'fit' });
+  expect(layout?.center).toEqual({ x: 1150, y: 1300 });
+  pdfSave.mockClear(); await exportPDF(project);
+  expect(pdfSave).toHaveBeenCalled();
 });

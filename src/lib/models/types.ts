@@ -259,6 +259,20 @@ export interface Floor {
   textAnnotations: TextAnnotation[];
   groups: ElementGroup[];
   entourage?: EntourageItem[];
+  /** Outdoor ground areas; omitted in projects without landscaping. */
+  landscape?: LandscapeArea[];
+}
+
+export const LANDSCAPE_SURFACES = ['grass', 'tarmac', 'gravel', 'soil', 'concrete', 'sandstone'] as const;
+export type LandscapeSurface = typeof LANDSCAPE_SURFACES[number];
+
+/** A closed ground area on the landscaping layer. Areas never overlap one another. */
+export interface LandscapeArea {
+  id: string;
+  name?: string;
+  /** Corners in cm, counter-clockwise, without repeating the first corner. */
+  points: Point[];
+  surface: LandscapeSurface;
 }
 
 export interface CustomModelDef {
@@ -308,4 +322,6 @@ export interface Project {
   customEntourage?: CustomEntourageDef[];
   /** Height in cm given to walls drawn from now on in this project; absent means 280. Existing walls keep their own heights. */
   defaultWallHeight?: number;
+  /** Surface covering the 3D ground outside drawn landscape areas; absent means the plain grey ground. */
+  defaultGround?: LandscapeSurface;
 }

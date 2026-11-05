@@ -9,6 +9,7 @@ import { visiblePlanFloor, type PlanExportVisibility } from './exportVisibility'
 import { resolveRooms } from './roomDetection';
 import { drawRooms, drawDoorOnWall, drawWindowOnWall, drawFurnitureItem, drawStair, drawColumn, drawAnnotations, drawPersistedMeasurements, drawTextAnnotations, drawEntourageItems } from './canvasRenderer';
 import { worldToScreen, type CanvasState } from './canvasInteraction';
+import { drawLandscape, drawLandscapeLabels } from './landscapeRenderer';
 import { activePrintFloor, printPageLayout, type PrintInk, type PrintOptions } from './printLayout';
 
 const PIXELS_PER_MM = 6;
@@ -55,6 +56,8 @@ export function renderPrintPage(canvas: HTMLCanvasElement, project: Project, opt
   ctx.scale(1 / PIXELS_PER_MM, 1 / PIXELS_PER_MM);
   const cs: CanvasState = { ctx, width: area.width * PIXELS_PER_MM, height: area.height * PIXELS_PER_MM, zoom: mmPerCm * PIXELS_PER_MM, camX: center.x, camY: center.y };
   const settings = get(projectSettings);
+  // Landscaping lies under the rooms, as in the editor; its names go above the walls.
+  drawLandscape(cs, floor.landscape ?? [], new Set());
   drawRooms(cs, floor, resolveRooms(floor), null, visibility.roomLabels, visibility.roomDimensions, settings);
   ctx.strokeStyle = '#334155';
   ctx.lineCap = 'round';
@@ -68,6 +71,7 @@ export function renderPrintPage(canvas: HTMLCanvasElement, project: Project, opt
     } else ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
+  drawLandscapeLabels(cs, floor.landscape ?? []);
   for (const door of floor.doors) { const wall = floor.walls.find(w => w.id === door.wallId); if (wall) drawDoorOnWall(cs, wall, door); }
   for (const win of floor.windows) { const wall = floor.walls.find(w => w.id === win.wallId); if (wall) drawWindowOnWall(cs, wall, win); }
   // Under furniture, stairs and notes, as in the editor and the other exports, so an uploaded symbol cannot cover a label.

@@ -4,11 +4,12 @@ import { splitWallGeometry } from '$lib/utils/splitWallGeometry';
 import { wallPathProfile } from '$lib/utils/wallProfiles';
 import { duplicatePlanSelection, pastePlanSelection, shiftedOpeningPosition } from '$lib/utils/duplicateSelection';
 import { writable, derived, get, type Writable } from 'svelte/store';
-import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Stair, Column, BackgroundImage, GuideLine, ElementGroup, EntourageItem, InterchangeState } from '$lib/models/types';
+import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Stair, Column, BackgroundImage, GuideLine, ElementGroup, EntourageItem, InterchangeState, LandscapeArea, LandscapeSurface } from '$lib/models/types';
+import { isSimplePolygon, normalisePolygon, wouldOverlap, landscapeLayoutValid } from '$lib/utils/landscapeGeometry';
 import { planWallResize, finitePoint, validPositiveDimension, validOpeningPosition, type WallEndpoint } from '$lib/utils/wallEditing';
 import { getOuterWalls } from '$lib/utils/outerWalls';
 import { nextFloorLevel, floorElevations, validFloorElevation, orderedFloors, DEFAULT_FLOOR_SPACING } from '$lib/utils/floors';
-import { getWallStartHeight, getWallEndHeight, getWallHeightAt, validWallHeight, projectDefaultWallHeight, validDefaultWallHeight } from '$lib/models/types';
+import { getWallStartHeight, getWallEndHeight, getWallHeightAt, validWallHeight, projectDefaultWallHeight, validDefaultWallHeight, LANDSCAPE_SURFACES } from '$lib/models/types';
 import type { DetailTarget, ItemDetails } from '$lib/models/types';
 import { detailItem, itemDetails, validateItemDetails } from '$lib/utils/itemDetails';
 import { readProject } from '$lib/utils/projectValidation';
@@ -63,7 +64,7 @@ export const activeFloor = derived(currentProject, ($p) => {
   return $p.floors.find((f) => f.id === $p.activeFloorId) ?? $p.floors[0] ?? null;
 });
 
-export type Tool = 'select' | 'wall' | 'door' | 'window' | 'furniture' | 'text' | 'measure' | 'annotate';
+export type Tool = 'select' | 'wall' | 'door' | 'window' | 'furniture' | 'text' | 'measure' | 'annotate' | 'landscape';
 const toolInner = writable<Tool>('select');
 /** Drawing tools are unavailable while read-only: the tool stays on 'select'. */
 export const selectedTool: Writable<Tool> = {
@@ -241,7 +242,7 @@ function pruneFloorContext(project: Project) {
   const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
   if (!floor) return;
   const ids = new Set([floor.walls, floor.doors, floor.windows, floor.furniture, floor.stairs ?? [], floor.columns ?? [], floor.guides ?? [],
-    floor.measurements ?? [], floor.annotations ?? [], floor.textAnnotations ?? [], floor.entourage ?? []].flat().map(item => item.id));
+    floor.measurements ?? [], floor.annotations ?? [], floor.textAnnotations ?? [], floor.entourage ?? [], floor.landscape ?? []].flat().map(item => item.id));
   const prune = (store: Writable<string | null>, known: Set<string>) => {
     const id = get(store);
     if (id !== null && !known.has(id)) store.set(null);
@@ -655,6 +656,69 @@ export function addCustomEntourage(name: string, dataUrl: string, aspect: number
   return id;
 }
 
+// --- Landscaping (outdoor ground areas) ---
+/** Surface given to the next area drawn with the landscape tool. */
+export const landscapeSurfaceStore = writable<LandscapeSurface>('grass');
+
+/** Add a ground area. Returns null, changing nothing, when the outline is not simple or overlaps an existing area. */
+export function addLandscapeArea(points: Point[], surface: LandscapeSurface): string | null {
+  const floor = get(activeFloor);
+  if (!floor || get(readOnly)) return null;
+  const outline = normalisePolygon(points.filter(finitePoint));
+  if (!isSimplePolygon(outline) || wouldOverlap(outline, floor.landscape ?? [])) return null;
+  const id = uid();
+  mutate((f) => {
+    if (!f.landscape) f.landscape = [];
+    f.landscape.push({ id, points: outline, surface });
+  }, 'Added landscape area');
+  return id;
+}
+
+export function updateLandscapeArea(id: string, updates: Partial<Pick<LandscapeArea, 'name' | 'surface'>>) {
+  mutate((f) => {
+    const a = f.landscape?.find((a) => a.id === id);
+    if (a) Object.assign(a, updates);
+  }, undefined, coalesceKeyFor('landscape', id, updates));
+}
+
+function landscapeDraft(): LandscapeArea[] | null {
+  const p = editableProject();
+  return p?.floors.find((f) => f.id === p.activeFloorId)?.landscape ?? null;
+}
+
+function publishDraft() {
+  const p = editableProject();
+  if (!p) return;
+  p.updatedAt = new Date();
+  currentProject.set({ ...p });
+}
+
+/** Translate an area without snapshotting (used during drag). */
+export function moveLandscapeArea(id: string, dx: number, dy: number) {
+  const area = landscapeDraft()?.find((a) => a.id === id);
+  if (!area || (!dx && !dy) || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+  area.points = area.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  publishDraft();
+}
+
+/** Place corners without snapshotting (used during corner drag, where joined corners move together). */
+export function moveLandscapeVertices(moves: { areaId: string; index: number }[], position: Point) {
+  if (!finitePoint(position)) return;
+  const areas = landscapeDraft();
+  if (!areas) return;
+  let changed = false;
+  for (const { areaId, index } of moves) {
+    const pt = areas.find((a) => a.id === areaId)?.points[index];
+    if (pt && !samePoint(pt, position)) { pt.x = position.x; pt.y = position.y; changed = true; }
+  }
+  if (changed) publishDraft();
+}
+
+/** Whether the active floor's areas are all simple and free of overlaps (checked when a drag ends). */
+export function landscapeIsValid(): boolean {
+  return landscapeLayoutValid(get(activeFloor)?.landscape ?? []);
+}
+
 /** Scale calibration mode */
 export const calibrationMode = writable<boolean>(false);
 export const calibrationPoints = writable<Point[]>([]);
@@ -702,6 +766,7 @@ export function removeElement(id: string) {
     if (f.measurements) f.measurements = f.measurements.filter(item => item.id !== id);
     if (f.annotations) f.annotations = f.annotations.filter(item => item.id !== id);
     if (f.entourage) f.entourage = f.entourage.filter((e) => e.id !== id);
+    if (f.landscape) f.landscape = f.landscape.filter((a) => a.id !== id);
     if (f.groups) f.groups = f.groups.map(group => ({ ...group, elementIds: group.elementIds.filter(itemId => !removedIds.has(itemId)) })).filter(group => group.elementIds.length >= 2);
   }, 'Deleted element');
 }
@@ -1040,6 +1105,17 @@ export function updateProjectDefaultWallHeight(height?: number) {
   snapshot('Changed default wall height', 'project-default-wall-height');
   if (height === undefined) delete p.defaultWallHeight;
   else p.defaultWallHeight = height;
+  p.updatedAt = new Date();
+  currentProject.set({ ...p });
+}
+
+/** Sets the surface shown on the 3D ground around the plan, or clears it back to the plain ground. */
+export function updateProjectDefaultGround(surface?: LandscapeSurface) {
+  const p = editableProject();
+  if (!p || (surface !== undefined && !LANDSCAPE_SURFACES.includes(surface)) || p.defaultGround === surface) return;
+  snapshot('Changed default ground');
+  if (surface === undefined) delete p.defaultGround;
+  else p.defaultGround = surface;
   p.updatedAt = new Date();
   currentProject.set({ ...p });
 }
@@ -1432,8 +1508,8 @@ export function moveTextAnnotation(id: string, position: { x: number; y: number 
 
 // Layer visibility store (used by LayersPanel, FloorPlanCanvas and the plan exports)
 /** `floorBelow` is the dimmed reference underlay of the storey beneath the active one; `roomLabels` shows room names and areas. */
-export const layerVisibility = writable<{ walls: boolean; doors: boolean; windows: boolean; furniture: boolean; stairs: boolean; columns: boolean; guides: boolean; measurements: boolean; annotations: boolean; textAnnotations: boolean; entourage: boolean; floorBelow: boolean; roomLabels: boolean }>({
-  walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, floorBelow: true, roomLabels: true,
+export const layerVisibility = writable<{ walls: boolean; doors: boolean; windows: boolean; furniture: boolean; stairs: boolean; columns: boolean; guides: boolean; measurements: boolean; annotations: boolean; textAnnotations: boolean; entourage: boolean; landscape: boolean; floorBelow: boolean; roomLabels: boolean }>({
+  walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, landscape: true, floorBelow: true, roomLabels: true,
 });
 
 // --- Lock ---

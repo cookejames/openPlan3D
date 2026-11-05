@@ -14,7 +14,7 @@
   let selId: string | null = $state(null);
   onDestroy(selectedElementId.subscribe(id => { selId = id; }));
 
-  let vis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, floorBelow: true });
+  let vis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, landscape: true, floorBelow: true });
   onDestroy(layerVisibility.subscribe(v => { vis = v; }));
 
   // Collapsed state per category
@@ -79,6 +79,13 @@
       cats.push({
         key: 'entourage', label: $t('layers.entourage'), icon: '🌳',
         items: floor.entourage.map((en, i) => ({ id: en.id, label: entourageLabels[en.defId] ? $t(entourageLabels[en.defId]) : getEntourageDef(en.defId)?.name ?? $t('layers.custom', { number: i + 1 }), icon: '🌳' })),
+      });
+    }
+
+    if (floor.landscape?.length) {
+      cats.push({
+        key: 'landscape', label: $t('layers.landscape'), icon: '🌱',
+        items: floor.landscape.map((area, i) => ({ id: area.id, label: area.name?.trim() || $t('layers.landscapeArea', { surface: $t(`landscape.surface.${area.surface}`), number: i + 1 }), icon: '🌱' })),
       });
     }
 

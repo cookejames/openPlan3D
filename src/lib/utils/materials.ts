@@ -1,3 +1,5 @@
+import type { LandscapeSurface } from '$lib/models/types';
+
 export interface FloorMaterial {
   id: string;
   name: string;
@@ -31,6 +33,28 @@ export const floorMaterials: FloorMaterial[] = [
   { id: 'slate', name: 'Slate', color: '#708090', pattern: 'slate', roughness: 0.8 },
   { id: 'vinyl', name: 'Vinyl', color: '#c4a882', pattern: 'vinyl', roughness: 0.5 },
 ];
+
+export interface LandscapeMaterial {
+  id: LandscapeSurface;
+  /** i18n key of the surface name. */
+  labelKey: `landscape.surface.${LandscapeSurface}`;
+  /** Flat colour shown until the photo texture has loaded. */
+  color: string;
+  roughness: number;
+}
+
+export const landscapeMaterials: LandscapeMaterial[] = [
+  { id: 'grass', labelKey: 'landscape.surface.grass', color: '#5b7f32', roughness: 1 },
+  { id: 'tarmac', labelKey: 'landscape.surface.tarmac', color: '#3b3e44', roughness: 0.9 },
+  { id: 'gravel', labelKey: 'landscape.surface.gravel', color: '#8f877c', roughness: 1 },
+  { id: 'soil', labelKey: 'landscape.surface.soil', color: '#5a3d26', roughness: 1 },
+  { id: 'concrete', labelKey: 'landscape.surface.concrete', color: '#9ca3af', roughness: 0.9 },
+  { id: 'sandstone', labelKey: 'landscape.surface.sandstone', color: '#c9bb8e', roughness: 0.85 },
+];
+
+export function getLandscapeMaterial(id: string): LandscapeMaterial {
+  return landscapeMaterials.find(m => m.id === id) ?? landscapeMaterials[0];
+}
 
 export const wallColors: WallColor[] = [
   { id: 'white', name: 'White', color: '#ffffff' },

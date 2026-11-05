@@ -1,5 +1,5 @@
 import type { Project, DetailKind } from '$lib/models/types';
-import { MAX_FURNITURE_ELEVATION, validDefaultWallHeight } from '$lib/models/types';
+import { MAX_FURNITURE_ELEVATION, LANDSCAPE_SURFACES, validDefaultWallHeight } from '$lib/models/types';
 import { validateItemDetails, validateRetainedDetailState } from './itemDetails';
 import { refreshLegacyFurnitureCategories } from './legacyFurnitureCategories';
 import { validateCustomModelDefinitions } from './customModelDefinitions';
@@ -56,6 +56,8 @@ export function readProject(value: unknown): Project {
   text(project!.name, 'name'); strings(project!, ['description'], 'document');
   // An unusable Default wall height is dropped rather than rejecting the plan: new walls then use 280 cm.
   if (project!.defaultWallHeight !== undefined && !validDefaultWallHeight(project!.defaultWallHeight)) delete project!.defaultWallHeight;
+  // An unknown default ground falls back to the plain ground rather than rejecting the plan.
+  if (project!.defaultGround !== undefined && !(LANDSCAPE_SURFACES as readonly unknown[]).includes(project!.defaultGround)) delete project!.defaultGround;
   if (project!.projectPackage !== undefined) validateRetainedDetailState(project!.projectPackage);
   const customModelIds = validateCustomModelDefinitions(project!.customModels, project!.projectPackage?.assets);
   if (project!.attachmentNames !== undefined) {
@@ -173,6 +175,13 @@ export function readProject(value: unknown): Project {
       text(item.defId, `${path}.defId`, true); positioned(item, path); positive(item.width, `${path}.width`);
       if (item.opacity !== undefined) number(item.opacity, `${path}.opacity`, 0, 1);
       booleans(item, ['locked'], path);
+    });
+    if (floor.landscape !== undefined) elements('landscape', (item, path) => {
+      if (!Array.isArray(item.points) || item.points.length < 3) fail(`${path}.points`, 'must list at least three corners');
+      item.points.forEach((p: unknown, i: number) => point(p, `${path}.points[${i}]`));
+      // A surface added by a newer version reads as grass rather than rejecting the file.
+      if (!(LANDSCAPE_SURFACES as readonly string[]).includes(item.surface)) item.surface = 'grass';
+      strings(item, ['name'], path);
     });
     if (floor.backgroundImage !== undefined) {
       const bg = record(floor.backgroundImage, `${path}.backgroundImage`), bgPath = `${path}.backgroundImage`;

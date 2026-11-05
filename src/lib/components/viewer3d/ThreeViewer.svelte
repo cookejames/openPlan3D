@@ -10,9 +10,11 @@
   import { openAISettings, setOpenAIModel } from '$lib/stores/aiKeys';
   import { generateOpenAIRenderImage, validateOpenAIConfig, getEffectiveModel, normalizeBaseUrl } from '$lib/utils/openaiClient';
   import OpenAIModelPicker from '$lib/components/ai/OpenAIModelPicker.svelte';
-  import { activeFloor, currentProject, selectedElementId } from '$lib/stores/project';
+  import { activeFloor, currentProject, selectedElementId, layerVisibility } from '$lib/stores/project';
+  import { getLandscapeMaterial } from '$lib/utils/materials';
+  import { LANDSCAPE_TILE_CM } from '$lib/utils/landscapeRenderer';
   import { triggerTip } from '$lib/stores/onboarding.svelte';
-  import type { Floor, Wall, Door, Window as Win, Stair } from '$lib/models/types';
+  import type { Project, Floor, Wall, Door, Window as Win, Stair } from '$lib/models/types';
   import { getWallStartHeight, getWallEndHeight } from '$lib/models/types';
   import { wallColors, type WallColor } from '$lib/utils/materials';
   import { projectSettings, formatArea } from '$lib/stores/settings';
@@ -45,7 +47,7 @@
   import { getMaterial } from '$lib/utils/materials';
   import { doorFrameBoxes } from '$lib/utils/openingFrames';
   import { DEPTH_ORDER, depthOffset, furnitureDepthOffsets } from '$lib/utils/depthOrder';
-  import { getWallTextureCanvas, getFloorTextureCanvas, setTextureLoadCallback } from '$lib/utils/textureGenerator';
+  import { getWallTextureCanvas, getFloorTextureCanvas, getLandscapeTextureCanvas, setTextureLoadCallback } from '$lib/utils/textureGenerator';
 
   let container: HTMLDivElement;
   let renderer: THREE.WebGLRenderer;
@@ -92,8 +94,15 @@
   let wallsTransparent = $state(false);
   // Multi-floor stacking
   let showAllFloors = $state(false);
+  let showLandscape = get(layerVisibility).landscape;
   let activeFloorElevation = $state(0);
   let sceneGround: THREE.Mesh;
+  /** The plain grey ground texture, and the surface (if any) currently painted on the ground instead. */
+  let plainGroundTex: THREE.Texture;
+  let groundSurfaceTex: THREE.Texture | null = null;
+  let groundSurfaceKey = '';
+  /** The 40 m wooden studio floor under the plan, hidden while a default ground surface is shown. */
+  let basePlane: THREE.Mesh;
   // Stacked geometry uses the same floor levels as the 2D reference layer.
 
   // Walkthrough mode
@@ -761,7 +770,7 @@
     for (let y = 0; y <= 1024; y += gridStep * 4) {
       gctx.beginPath(); gctx.moveTo(0, y); gctx.lineTo(1024, y); gctx.stroke();
     }
-    const groundTex = ownColorCanvasTexture(groundCanvas);
+    const groundTex = plainGroundTex = ownColorCanvasTexture(groundCanvas);
     groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
     groundTex.repeat.set(groundSize / 4000, groundSize / 4000);
     const groundMat = new THREE.MeshStandardMaterial({
@@ -997,6 +1006,8 @@
     floorMesh.position.y = 0.5;
     floorMesh.receiveShadow = true;
     scene.add(floorMesh);
+    basePlane = floorMesh;
+    groundSurfaceKey = '';
 
     wallGroup = new THREE.Group();
     scene.add(wallGroup);
@@ -1275,11 +1286,49 @@
     }
   }
 
+  /** Ground areas of the landscaping layer, between the base plane and the room floors. UVs are in world
+   *  centimetres so neighbouring areas of one surface tile seamlessly. Skipped while the layer is hidden. */
+  function buildLandscape(floor: Floor, group: THREE.Group, yOffset: number, opacity = 1) {
+    if (!showLandscape) return;
+    for (const area of floor.landscape ?? []) {
+      if (area.points.length < 3) continue;
+      const shape = new THREE.Shape();
+      shape.moveTo(area.points[0].x, -area.points[0].y);
+      for (const p of area.points.slice(1)) shape.lineTo(p.x, -p.y);
+      shape.closePath();
+      const geo = new THREE.ShapeGeometry(shape);
+      const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / LANDSCAPE_TILE_CM, uv.getY(i) / LANDSCAPE_TILE_CM);
+      uv.needsUpdate = true;
+      const surface = getLandscapeMaterial(area.surface);
+      const canvas = getLandscapeTextureCanvas(area.surface);
+      let map: THREE.Texture | null = null;
+      if (canvas) {
+        map = ownColorCanvasTexture(canvas);
+        map.wrapS = map.wrapT = THREE.RepeatWrapping;
+      }
+      const material = new THREE.MeshStandardMaterial({
+        ...(map ? { map } : { color: new THREE.Color(surface.color) }),
+        roughness: surface.roughness,
+        ...(opacity < 1 ? { transparent: true, opacity, depthWrite: false } : {}),
+        ...depthOffset(DEPTH_ORDER.landscape),
+      });
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.userData.renderMaterial = 'floor';
+      mesh.userData.landscapeId = area.id;
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = yOffset + 0.75;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+  }
+
   function buildWalls(floor: Floor) {
     wallHighlight.clear();
     clearGroup(wallGroup);
     cameraHelper = null;
     wallMeshMap.clear();
+    buildLandscape(floor, wallGroup, 0);
 
     const defaultInteriorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, ...depthOffset(DEPTH_ORDER.interiorWall) });
     const defaultExteriorMat = new THREE.MeshStandardMaterial({ color: 0xd4cfc9, roughness: 0.85 });
@@ -1947,6 +1996,7 @@
 
   /** Build a single floor's walls/doors/windows into a group at a Y offset with optional transparency */
   function buildFloorIntoGroup(floor: Floor, group: THREE.Group, yOffset: number, opacity: number) {
+    buildLandscape(floor, group, yOffset, opacity);
     const transparentMat = (color: number, roughness = 0.9) => new THREE.MeshStandardMaterial({
       color, roughness, transparent: true, depthWrite: false, opacity, ...depthOffset(DEPTH_ORDER.interiorWall)
     });
@@ -2031,10 +2081,46 @@
     }
   }
 
+  /** Paints the project's default ground surface on the ground plane, tiled on the same world grid as
+   *  landscape areas so they join seamlessly. Hidden landscaping shows the plain ground. */
+  function applyGroundSurface(project: Project) {
+    const surface = showLandscape ? project.defaultGround : undefined;
+    const canvas = surface ? getLandscapeTextureCanvas(surface) : null;
+    const key = surface ? `${surface}:${canvas ? 'photo' : 'flat'}` : '';
+    if (key === groundSurfaceKey) return;
+    groundSurfaceKey = key;
+    const mat = sceneGround.material as THREE.MeshStandardMaterial;
+    groundSurfaceTex?.dispose();
+    groundSurfaceTex = null;
+    if (!surface) {
+      mat.map = plainGroundTex;
+      mat.color.set(0xffffff);
+      mat.roughness = 0.92;
+    } else {
+      const look = getLandscapeMaterial(surface);
+      if (canvas) {
+        groundSurfaceTex = ownColorCanvasTexture(canvas);
+        groundSurfaceTex.wrapS = groundSurfaceTex.wrapT = THREE.RepeatWrapping;
+        // The plane's UVs span its width; one repeat per LANDSCAPE_TILE_CM puts tile seams on the
+        // same world lines as the landscape meshes' x / tile UVs (the plane is centred on 0).
+        const { width } = (sceneGround.geometry as THREE.PlaneGeometry).parameters;
+        groundSurfaceTex.repeat.set(width / LANDSCAPE_TILE_CM, width / LANDSCAPE_TILE_CM);
+      }
+      mat.map = groundSurfaceTex;
+      mat.color.set(groundSurfaceTex ? 0xffffff : look.color);
+      mat.roughness = look.roughness;
+    }
+    // The studio floor would cover the surface for 20 m around the plan; room floors cover the rooms.
+    basePlane.visible = !surface;
+    mat.needsUpdate = true;
+    markSceneDirty();
+  }
+
   function rebuildScene(force = false) {
     const project = get(currentProject);
     if (!project || !currentFloor) return;
-    const signature = sceneSignature(project, currentFloor, showAllFloors, get(projectSettings).units);
+    applyGroundSurface(project);
+    const signature = sceneSignature(project, currentFloor, showAllFloors, get(projectSettings).units) + (showLandscape ? '' : '|landscape-hidden');
     if (!force && signature === renderedSignature) return;
     const walkingPosition = walkthroughMode ? camera.position.clone() : null;
     const walkingRotation = walkthroughMode ? camera.quaternion.clone() : null;
@@ -2265,6 +2351,12 @@
       currentFloor = f;
       if (f) rebuildScene();
     });
+    // Hiding landscaping removes its meshes, so renders and exports leave it out too.
+    const stopLayers = layerVisibility.subscribe((v) => {
+      if (v.landscape === showLandscape) return;
+      showLandscape = v.landscape;
+      if (currentFloor) rebuildScene();
+    });
     // Room area labels are textures and must refresh when display units change.
     const stopSettings = projectSettings.subscribe(() => {
       if (currentFloor) rebuildScene();
@@ -2284,6 +2376,7 @@
       resizeObs.disconnect();
       unsub();
       stopSettings();
+      stopLayers();
       unsubSel();
       if (animId !== undefined) cancelAnimationFrame(animId);
       animId = undefined;
@@ -2297,6 +2390,9 @@
       wallHighlight.clear();
       removeGhostPreview();
       skyTexture.dispose();
+      // The ground holds only one of these at a time, so clearGroup cannot reach the other.
+      plainGroundTex.dispose();
+      groundSurfaceTex?.dispose();
       sunLight.shadow.dispose();
       clearGroup(scene);
       wallMeshMap.clear();

@@ -11,6 +11,11 @@
   import { get } from 'svelte/store';
   import { activateMeasurementTool, selectedTool, placingFurnitureId, placingDoorType, placingWindowType, placingStair, addStair, placingColumn, placingColumnShape, activeFloor, setBackgroundImage, canvasCamX, canvasCamY, placingEntourageId, addCustomEntourage } from '$lib/stores/project';
   import type { Tool } from '$lib/stores/project';
+  import { landscapeSurfaceStore } from '$lib/stores/project';
+  import type { LandscapeSurface } from '$lib/models/types';
+  import { landscapeMaterials } from '$lib/utils/materials';
+  import { landscapeTextureFiles } from '$lib/utils/textureFiles';
+  import { catalogAssetUrl } from '$lib/utils/catalogAssetUrl';
   import { toggleColumnPlacement, toggleStairPlacement } from '$lib/utils/placementArming';
   import type { Door, Window as Win, CustomEntourageDef } from '$lib/models/types';
   import { entourageCatalog, entourageCategories } from '$lib/utils/entourageCatalog';
@@ -54,6 +59,9 @@
   }
 
   let currentTool = $state<Tool>('select');
+  let currentLandscapeSurface = $state<LandscapeSurface>('grass');
+  onDestroy(landscapeSurfaceStore.subscribe((v) => { currentLandscapeSurface = v; }));
+  const landscapeSwatchUrl = (id: string) => catalogAssetUrl(`/textures/${landscapeTextureFiles[id]}`);
   onDestroy(selectedTool.subscribe((t) => { currentTool = t; }));
 
   let currentPlacing = $state<string | null>(null);
@@ -470,6 +478,34 @@
               <div class="font-medium text-xs">{$t('buildTools.square')}</div>
             </div>
           </button>
+        </div>
+
+        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3">{$t('landscape.section')}</h3>
+        <button
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'landscape' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
+          aria-pressed={currentTool === 'landscape'}
+          onclick={() => setTool('landscape')}
+        >
+          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'landscape' ? 'bg-blue-100' : ''}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19l4-11 6 4 4-7 4 14z"/><path d="M8 19c0-3 2-5 4-5s4 2 4 5"/></svg>
+          </div>
+          <div class="text-left">
+            <div class="font-medium">{$t('landscape.tool')} <span class="text-gray-400 text-xs ml-1">O</span></div>
+            <div class="text-xs text-gray-400">{$t('landscape.toolHelp')}</div>
+          </div>
+        </button>
+        <div class="grid grid-cols-6 gap-1.5 px-1" role="radiogroup" aria-label={$t('landscape.surface')}>
+          {#each landscapeMaterials as m (m.id)}
+            <button
+              role="radio"
+              aria-checked={currentLandscapeSurface === m.id}
+              title={$t(m.labelKey)}
+              aria-label={$t(m.labelKey)}
+              class="h-9 rounded-md border-2 bg-cover bg-center {currentLandscapeSurface === m.id ? 'border-blue-500' : 'border-transparent hover:border-gray-300'}"
+              style="background-color: {m.color}; background-image: url({landscapeSwatchUrl(m.id)})"
+              onclick={() => { landscapeSurfaceStore.set(m.id); setTool('landscape'); }}
+            ></button>
+          {/each}
         </div>
 
         <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3">{$t('buildTools.annotate')}</h3>
