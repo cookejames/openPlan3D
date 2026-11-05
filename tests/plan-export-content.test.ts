@@ -13,3 +13,9 @@ it('requires content that the plan exporters can draw', () => {
   expect(hasPlanExportContent({ ...floor, stairs: [{}] } as Floor)).toBe(true);
   expect(hasPlanExportContent({ ...floor, measurements: [{}] } as Floor)).toBe(true);
 });
+
+it('counts a landscape area with at least three corners', () => {
+  const floor = { walls: [], furniture: [] } as unknown as Floor;
+  expect(hasPlanExportContent({ ...floor, landscape: [{ points: [{}, {}] }] } as Floor)).toBe(false);
+  expect(hasPlanExportContent({ ...floor, landscape: [{ points: [{}, {}, {}] }] } as Floor)).toBe(true);
+});

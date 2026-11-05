@@ -1,4 +1,4 @@
-import { drawLandscape } from './landscapeRenderer';
+import { drawLandscape, drawLandscapeLabels, landscapeLabelPosition } from './landscapeRenderer';
 import { getLandscapeMaterial } from './materials';
 import { prepareEntourageImage } from './entourageImages';
 import { translate, type Locale, type TranslationKey } from '$lib/i18n';
@@ -71,6 +71,24 @@ function extendBoundsForOpenings(
 }
 
 /** Include label ink, not just its anchor, before framing a plan export. */
+function extendBoundsForLandscape(floor: Floor, bounds: { minX: number; minY: number; maxX: number; maxY: number }) {
+  for (const p of (floor.landscape ?? []).flatMap(a => a.points)) {
+    bounds.minX = Math.min(bounds.minX, p.x); bounds.minY = Math.min(bounds.minY, p.y);
+    bounds.maxX = Math.max(bounds.maxX, p.x); bounds.maxY = Math.max(bounds.maxY, p.y);
+  }
+}
+
+/** Landscaping under everything else on an offscreen plan whose origin is (minX - pad, minY - pad). */
+function drawLandscapeOnCanvas(ctx: CanvasRenderingContext2D, floor: Floor, minX: number, minY: number, pad: number) {
+  if (!floor.landscape?.length) return;
+  drawLandscape({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor.landscape, new Set());
+}
+
+/** Area names, drawn after the walls like the editor does. */
+function drawLandscapeLabelsOnCanvas(ctx: CanvasRenderingContext2D, floor: Floor, minX: number, minY: number, pad: number) {
+  if (floor.landscape?.length) drawLandscapeLabels({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor.landscape);
+}
+
 function extendBoundsForRoomLabels(floor: Floor, bounds: { minX: number; minY: number; maxX: number; maxY: number }) {
   const ctx = document.createElement('canvas').getContext('2d');
   if (!ctx) return;
@@ -225,10 +243,7 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
         bounds.minX = Math.min(bounds.minX, b.minX); bounds.minY = Math.min(bounds.minY, b.minY);
         bounds.maxX = Math.max(bounds.maxX, b.maxX); bounds.maxY = Math.max(bounds.maxY, b.maxY);
       }
-      for (const p of (floor.landscape ?? []).flatMap(a => a.points)) {
-        bounds.minX = Math.min(bounds.minX, p.x); bounds.minY = Math.min(bounds.minY, p.y);
-        bounds.maxX = Math.max(bounds.maxX, p.x); bounds.maxY = Math.max(bounds.maxY, p.y);
-      }
+      extendBoundsForLandscape(floor, bounds);
       for(const {item,aspect} of entourage){const b=entouragePlanBounds(item,aspect);
         bounds.minX=Math.min(bounds.minX,b.minX-2);bounds.minY=Math.min(bounds.minY,b.minY-2);
         bounds.maxX=Math.max(bounds.maxX,b.maxX+2);bounds.maxY=Math.max(bounds.maxY,b.maxY+2);
@@ -258,7 +273,7 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
       ctx.fillRect(0, 0, w, h);
 
       // Landscaping lies under everything else
-      if (floor.landscape?.length) drawLandscape({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor.landscape, new Set());
+      drawLandscapeOnCanvas(ctx, floor, minX, minY, pad);
 
       // Draw room fills
       const ROOM_COLORS = ['#bfdbfe', '#fde68a', '#bbf7d0', '#fecaca', '#ddd6fe', '#a5f3fc', '#fed7aa'];
@@ -314,6 +329,7 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
 
       // Draw doors and windows (shared full-fidelity renderer)
       drawOpeningsOnCanvas(ctx, floor, minX, minY, pad);
+      drawLandscapeLabelsOnCanvas(ctx, floor, minX, minY, pad);
 
       for (const item of floor.furniture) drawFurnitureItem({
         ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY,
@@ -372,10 +388,7 @@ export function exportAsSVG(project: Project, language: Locale = 'en', visibilit
     svgBounds.minX = Math.min(svgBounds.minX, b.minX); svgBounds.minY = Math.min(svgBounds.minY, b.minY);
     svgBounds.maxX = Math.max(svgBounds.maxX, b.maxX); svgBounds.maxY = Math.max(svgBounds.maxY, b.maxY);
   }
-  for (const p of (floor.landscape ?? []).flatMap(a => a.points)) {
-    svgBounds.minX = Math.min(svgBounds.minX, p.x); svgBounds.minY = Math.min(svgBounds.minY, p.y);
-    svgBounds.maxX = Math.max(svgBounds.maxX, p.x); svgBounds.maxY = Math.max(svgBounds.maxY, p.y);
-  }
+  extendBoundsForLandscape(floor, svgBounds);
   for (const {item,aspect} of entourage) {
     const b=entouragePlanBounds(item,aspect);
     svgBounds.minX=Math.min(svgBounds.minX,b.minX-2);svgBounds.minY=Math.min(svgBounds.minY,b.minY-2);
@@ -450,6 +463,13 @@ export function exportAsSVG(project: Project, language: Locale = 'en', visibilit
       paths+='</g>';
     } else if (custom) paths+=`<image href="${escapeXml(custom.dataUrl)}" x="${-width/2}" y="${-height/2}" width="${width}" height="${height}" preserveAspectRatio="none"/>`;
     paths+='</g>\n';
+  }
+
+  // Landscape area names, above the walls as in the editor
+  for (const area of floor.landscape ?? []) {
+    if (!area.name?.trim() || area.points.length < 3) continue;
+    const c = landscapeLabelPosition(area);
+    paths += `  <text x="${c.x - minX + pad}" y="${c.y - minY + pad}" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#1e293b" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" paint-order="stroke" font-family="sans-serif">${escapeXml(area.name)}</text>\n`;
   }
 
   // Doors: wall gap + jambs + type-specific glyph (swing arc / panels)
@@ -744,6 +764,7 @@ function renderPDF(project: Project, preparedImages: ReadonlyMap<string,HTMLImag
     pdfBounds.minX = Math.min(pdfBounds.minX, b.minX); pdfBounds.minY = Math.min(pdfBounds.minY, b.minY);
     pdfBounds.maxX = Math.max(pdfBounds.maxX, b.maxX); pdfBounds.maxY = Math.max(pdfBounds.maxY, b.maxY);
   }
+  extendBoundsForLandscape(floor, pdfBounds);
   for(const {item,aspect} of entourage){const b=entouragePlanBounds(item,aspect);
     pdfBounds.minX=Math.min(pdfBounds.minX,b.minX-2);pdfBounds.minY=Math.min(pdfBounds.minY,b.minY-2);
     pdfBounds.maxX=Math.max(pdfBounds.maxX,b.maxX+2);pdfBounds.maxY=Math.max(pdfBounds.maxY,b.maxY+2);
@@ -769,6 +790,9 @@ function renderPDF(project: Project, preparedImages: ReadonlyMap<string,HTMLImag
   ctx.scale(scale, scale);
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, planW, planH);
+
+  // Landscaping lies under everything else
+  drawLandscapeOnCanvas(ctx, floor, minX, minY, pad);
 
   // Room fills
   const ROOM_COLORS = ['#bfdbfe', '#fde68a', '#bbf7d0', '#fecaca', '#ddd6fe', '#a5f3fc', '#fed7aa'];
@@ -822,6 +846,7 @@ function renderPDF(project: Project, preparedImages: ReadonlyMap<string,HTMLImag
 
   // Doors and windows (shared full-fidelity renderer)
   drawOpeningsOnCanvas(ctx, floor, minX, minY, pad);
+  drawLandscapeLabelsOnCanvas(ctx, floor, minX, minY, pad);
 
   for (const item of floor.furniture) drawFurnitureItem({
     ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY,

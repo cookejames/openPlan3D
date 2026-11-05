@@ -65,6 +65,12 @@ export function drawLandscape(cs: CanvasState, areas: LandscapeArea[], selectedI
   });
 }
 
+/** Where an area's name is drawn: the centre of its bounding box. */
+export function landscapeLabelPosition(area: LandscapeArea): Point {
+  const xs = area.points.map(p => p.x), ys = area.points.map(p => p.y);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+}
+
 /** Names of named areas at their bounding-box centre, drawn in screen space above the plan. */
 export function drawLandscapeLabels(cs: CanvasState, areas: LandscapeArea[]) {
   const { ctx } = cs;
@@ -74,8 +80,7 @@ export function drawLandscapeLabels(cs: CanvasState, areas: LandscapeArea[]) {
   ctx.textBaseline = 'middle';
   for (const area of areas) {
     if (!area.name?.trim() || area.points.length < 3) continue;
-    const xs = area.points.map(p => p.x), ys = area.points.map(p => p.y);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const { x: cx, y: cy } = landscapeLabelPosition(area);
     const sx = (cx - cs.camX) * cs.zoom + cs.width / 2, sy = (cy - cs.camY) * cs.zoom + cs.height / 2;
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
