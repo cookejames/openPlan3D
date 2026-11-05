@@ -196,6 +196,51 @@
       "provenanceStatus": "documented-locally-not-source-byte-verified"
     },
     {
+      "path": "static/textures/landscape-grass.webp",
+      "bytes": 230978,
+      "sha256": "48fe54db51a9b95789a3252f9974525bcd954c877f6081ff0fec0b4b379ae6dd",
+      "materialIds": [],
+      "sourceAssetId": "Grass001",
+      "creditsPath": "static/textures/CREDITS.md",
+      "provenanceStatus": "documented-locally-not-source-byte-verified"
+    },
+    {
+      "path": "static/textures/landscape-gravel.webp",
+      "bytes": 225734,
+      "sha256": "903053c372e52fc68343dcc18a41c5bc6d85732651109c8ef90311853faa24c8",
+      "materialIds": [],
+      "sourceAssetId": "Gravel022",
+      "creditsPath": "static/textures/CREDITS.md",
+      "provenanceStatus": "documented-locally-not-source-byte-verified"
+    },
+    {
+      "path": "static/textures/landscape-sandstone.webp",
+      "bytes": 124602,
+      "sha256": "7c9245dd73051267c364ba6621aca49bd0b780d70b77f58ec20560df5026ffbd",
+      "materialIds": [],
+      "sourceAssetId": "PavingStones133",
+      "creditsPath": "static/textures/CREDITS.md",
+      "provenanceStatus": "documented-locally-not-source-byte-verified"
+    },
+    {
+      "path": "static/textures/landscape-soil.webp",
+      "bytes": 432756,
+      "sha256": "7d46b29b25810ea5e06cec9ebe2ebdff040959d801b13bb195722739e4929171",
+      "materialIds": [],
+      "sourceAssetId": "Ground048",
+      "creditsPath": "static/textures/CREDITS.md",
+      "provenanceStatus": "documented-locally-not-source-byte-verified"
+    },
+    {
+      "path": "static/textures/landscape-tarmac.webp",
+      "bytes": 197394,
+      "sha256": "9a32d838508d9e8f167fb9fb161e0269b1c50d2c75d76fb71de06820d8e9a160",
+      "materialIds": [],
+      "sourceAssetId": "Asphalt010",
+      "creditsPath": "static/textures/CREDITS.md",
+      "provenanceStatus": "documented-locally-not-source-byte-verified"
+    },
+    {
       "path": "static/textures/stone.webp",
       "bytes": 269744,
       "sha256": "ea0ed6e2118d95d60520a009294b3c378eaa5593d99acf1052fce05cce6b093f",
