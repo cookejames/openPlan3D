@@ -12,9 +12,9 @@
   import { createDrawScheduler } from '$lib/utils/drawScheduler';
   import { activeFloor, selectedTool, selectedElementId, selectedElementIds, selectedRoomId, addWall, addDoor, addWindow, updateWall, moveWallEndpoint, moveWallGeometryDuringDrag, updateDoor, updateWindow, addFurniture, moveFurniture, transformFurnitureDuringDrag, rotateFurniture, rotateSelection, setFurnitureRotation, scaleFurniture, removeElement, placingFurnitureId, placingRotation, placingDoorType, placingWindowType, detectedRoomsStore, duplicateDoor, duplicateWindow, duplicateFurniture, duplicateSelection, pasteSelection, moveWallParallel, splitWall, wallSplitIntersectsOpening, snapEnabled, placingStair, addStair, moveStair, updateStair, placingColumn, placingColumnShape, addColumn, moveColumn, updateColumn, calibrationMode, calibrationPoints, updateBackgroundImage, setBackgroundImage, canvasZoom, canvasMinimumZoom, canvasCamX, canvasCamY, panMode, showFurnitureStore, addGuide, moveGuide, removeGuide, beginUndoGroup, endUndoGroup, layerVisibility, updateRoom, addMeasurement, updateMeasurement, removeMeasurement, addAnnotation, removeAnnotation, updateAnnotation, addTextAnnotation, removeTextAnnotation, updateTextAnnotation, moveTextAnnotation, toggleFurnitureLock, toggleSelectionLock, createGroup, ungroupElements, findGroupForElement, placingEntourageId, addEntourageItem, moveEntourage, resizeEntourage, currentProject, elevationWallId, elevationPickMode, doorJoinMode, joinScanDoors, addLandscapeArea, moveLandscapeArea, moveLandscapeVertices, landscapeIsValid, landscapeSurfaceStore } from '$lib/stores/project';
   import { cornersAt, findLandscapeAt, snapToLandscape } from '$lib/utils/landscapeGeometry';
-  import { drawLandscape, drawLandscapeLabels, drawLandscapePreview } from '$lib/utils/landscapeRenderer';
+  import { drawLandscape, drawLandscapeGround, drawLandscapeLabels, drawLandscapePreview } from '$lib/utils/landscapeRenderer';
   import type { Point, Wall, Door, Window as Win, FurnitureItem, Stair, Column, GuideLine, Measurement, Annotation, TextAnnotation, CustomEntourageDef } from '$lib/models/types';
-  import type { Floor, Room } from '$lib/models/types';
+  import type { Floor, Room, LandscapeSurface } from '$lib/models/types';
   import { resolveRoomGeometry, roomLabelPosition, roomCentroid } from '$lib/utils/roomDetection';
   import { roomHoles } from '$lib/utils/roomNesting';
   import { getFloorBelow } from '$lib/utils/floors';
@@ -106,6 +106,8 @@
   let resizingEntourageId: string | null = $state(null);
   let currentEntourageDefId: string | null = $state(null);
   let customEntourageDefs: CustomEntourageDef[] | undefined = $state(undefined);
+  /** Project Settings → Default ground, painted behind the plan while landscaping is shown. */
+  let defaultGround: LandscapeSurface | undefined = undefined;
   let dragOffset: Point = { x: 0, y: 0 };
   let dragStartRotation: number = 0;
   let dragWasWallSnapped: boolean = false;
@@ -904,6 +906,21 @@
     return floorBelowOuterIds;
   }
 
+  /** Clip to everything outside the rooms. Room fills are translucent, so ground painted under them would
+   *  tint every floor; rooms instead keep the plain plan background, grid and any traced image. */
+  function clipOutRooms() {
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    for (const room of detectedRooms) {
+      for (const ring of [roomPolygons.get(room.id) ?? [], ...(roomHolePolygons.get(room.id) ?? [])]) {
+        if (ring.length < 3) continue;
+        ring.forEach((p, i) => { const s = worldToScreen(p.x, p.y); if (i) ctx.lineTo(s.x, s.y); else ctx.moveTo(s.x, s.y); });
+        ctx.closePath();
+      }
+    }
+    ctx.clip('evenodd');
+  }
+
   function updateDetectedRooms() {
     if (!currentFloor) {
       detectedRooms = [];
@@ -1164,18 +1181,25 @@
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = '#f8f9fa';
     ctx.fillRect(0, 0, width, height);
+    const floor = currentFloor;
+    if (floor) updateDetectedRooms();
+    // Under the grid, so the grid stays visible for drawing outdoors.
+    if (layerVis.landscape && defaultGround) {
+      ctx.save();
+      clipOutRooms();
+      drawLandscapeGround(getCS(), defaultGround);
+      ctx.restore();
+    }
     drawGrid();
     if (layerVis.guides) drawGuides();
     drawBackgroundImage();
 
-    const floor = currentFloor;
     if (!floor) return;
-    updateDetectedRooms();
     const selId = currentSelectedId;
     const multiIds = currentSelectedIds;
     function isSelected(id: string) { return id === selId || multiIds.has(id); }
 
-    if (layerVis.landscape && floor.landscape?.length) drawLandscape(getCS(), floor.landscape, new Set([selId ?? '', ...multiIds]));
+    if (layerVis.landscape && floor.landscape?.length) drawLandscape(getCS(), floor.landscape, new Set([selId ?? '', ...multiIds]), clipOutRooms);
     drawRooms();
     if (layerVis.landscape && floor.landscape?.length) drawLandscapeLabels(getCS(), floor.landscape);
     // Above the room fills, below this floor's own walls. Room floor textures
@@ -1862,6 +1886,7 @@
     const unsubEnt2 = currentProject.subscribe((pr) => {
       if (clipboard && clipboard.projectId !== pr?.id) clipboard = null;
       customEntourageDefs = pr?.customEntourage;
+      defaultGround = pr?.defaultGround;
       floorBelow = getFloorBelow(pr);
       queueInitialFit();
       markDirty();

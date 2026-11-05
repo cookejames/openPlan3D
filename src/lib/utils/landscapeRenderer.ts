@@ -22,32 +22,52 @@ function trace(ctx: CanvasRenderingContext2D, points: Point[]) {
   ctx.closePath();
 }
 
-/** Fill each area with its surface texture (world-anchored, so neighbours tile seamlessly) and outline it. */
-export function drawLandscape(cs: CanvasState, areas: LandscapeArea[], selectedIds: ReadonlySet<string>) {
+/** Fill an area's outline (already traced in world cm) with its surface: flat colour, then the photo on the world grid. */
+function fillSurface(ctx: CanvasRenderingContext2D, surface: string) {
+  ctx.fillStyle = getLandscapeMaterial(surface).color;
+  ctx.fill();
+  const tex = getLandscapeTextureCanvas(surface);
+  const pattern = tex && ctx.createPattern(tex, 'repeat');
+  if (!pattern) return;
+  const s = LANDSCAPE_TILE_CM / tex!.width;
+  pattern.setTransform(new DOMMatrix().scale(s, s));
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = pattern;
+  ctx.fill();
+  ctx.restore();
+}
+
+/** The project's default ground over the whole view, on the same world grid as the areas so they join seamlessly. */
+export function drawLandscapeGround(cs: CanvasState, surface: string) {
+  const { ctx, zoom } = cs;
+  inWorld(cs, () => {
+    const x = cs.camX - cs.width / 2 / zoom, y = cs.camY - cs.height / 2 / zoom;
+    ctx.beginPath();
+    ctx.rect(x, y, cs.width / zoom, cs.height / zoom);
+    fillSurface(ctx, surface);
+  });
+}
+
+/** Fill each area with its surface texture (world-anchored, so neighbours tile seamlessly) and outline it.
+ *  `clip`, given, sets a screen-space clip for the fills only, so selection handles stay visible. */
+export function drawLandscape(cs: CanvasState, areas: LandscapeArea[], selectedIds: ReadonlySet<string>, clip?: () => void) {
   if (!areas.length) return;
   const { ctx, zoom } = cs;
+  ctx.save();
+  clip?.();
   inWorld(cs, () => {
     for (const area of areas) {
       if (area.points.length < 3) continue;
-      const material = getLandscapeMaterial(area.surface);
       trace(ctx, area.points);
-      ctx.fillStyle = material.color;
-      ctx.fill();
-      const tex = getLandscapeTextureCanvas(area.surface);
-      const pattern = tex && ctx.createPattern(tex, 'repeat');
-      if (pattern) {
-        const s = LANDSCAPE_TILE_CM / tex!.width;
-        pattern.setTransform(new DOMMatrix().scale(s, s));
-        ctx.save();
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle = pattern;
-        ctx.fill();
-        ctx.restore();
-      }
+      fillSurface(ctx, area.surface);
       ctx.lineWidth = 1 / zoom;
       ctx.strokeStyle = 'rgba(30, 41, 59, 0.45)';
       ctx.stroke();
     }
+  });
+  ctx.restore();
+  inWorld(cs, () => {
     for (const area of areas) {
       if (!selectedIds.has(area.id)) continue;
       trace(ctx, area.points);
