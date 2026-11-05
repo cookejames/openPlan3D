@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 afterEach(() => { projectSettings.set(previousSettings); layerVisibility.set(previousLayers); });
 
-const defaults = { walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, entourage: true,
+const defaults = { walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, entourage: true, landscape: true,
   measurements: true, annotations: true, textAnnotations: true, roomLabels: true };
 const defaultDimensions = { showDimensions: true, showExternalDimensions: true, showInternalDimensions: false };
 
@@ -184,4 +184,15 @@ it('prints room width × depth only while automatic dimensions and Internal Dime
   expect(printed()).toContain('4 m × 3 m');
   projectSettings.update(s => ({ ...s, showDimensions: false }));
   expect(printed().some(text => text.includes(' × '))).toBe(false);
+});
+
+it('draws landscaping in the SVG export only while its layer is shown', async () => {
+  const project = shellProject();
+  project.floors[0].landscape = [{ id: 'lawn', surface: 'grass', points: [{ x: -300, y: -300 }, { x: 0, y: -300 }, { x: 0, y: 0 }, { x: -300, y: 0 }] }];
+  exportAsSVG(project);
+  const shown = await downloaded.at(-1)!.text();
+  expect(shown).toContain('data-landscape="lawn"');
+  expect(shown).toMatch(/viewBox="0 0 (\d+(\.\d+)?) /);
+  exportAsSVG(project, 'en', planExportVisibility({ ...defaults, landscape: false }, defaultDimensions));
+  expect(await downloaded.at(-1)!.text()).not.toContain('data-landscape');
 });

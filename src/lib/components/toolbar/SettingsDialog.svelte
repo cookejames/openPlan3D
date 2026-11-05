@@ -4,8 +4,11 @@
   import { modalDialog } from '$lib/utils/modalDialog';
   import { projectSettings } from '$lib/stores/settings';
   import type { ProjectSettings } from '$lib/stores/settings';
-  import { currentProject, updateProjectDefaultWallHeight, updateProjectDescription, updateProjectName } from '$lib/stores/project';
+  import { currentProject, updateProjectDefaultGround, updateProjectDefaultWallHeight, updateProjectDescription, updateProjectName } from '$lib/stores/project';
   import { DEFAULT_WALL_HEIGHT, projectDefaultWallHeight, validDefaultWallHeight, type Project } from '$lib/models/types';
+  import { landscapeMaterials } from '$lib/utils/materials';
+  import { landscapeTextureFiles } from '$lib/utils/textureFiles';
+  import { catalogAssetUrl } from '$lib/utils/catalogAssetUrl';
   import { themePreference, type ThemePreference } from '$lib/stores/theme';
   import { getGeminiKey, setGeminiKey } from '$lib/stores/aiKeys';
   import OpenAISettings from '$lib/components/ai/OpenAISettings.svelte';
@@ -175,6 +178,25 @@
                   class="text-xs text-blue-700 dark:text-blue-300 underline disabled:text-gray-400 disabled:no-underline">
                   {$t('floors.default', { value: DEFAULT_WALL_HEIGHT })}
                 </button>
+              </section>
+              <section aria-label={$t('settings.defaultGround')} class="space-y-1 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <span id="default-ground-label" class="block text-sm text-gray-700 dark:text-gray-300">{$t('settings.defaultGround')}</span>
+                <div class="grid grid-cols-7 gap-1.5" role="radiogroup" aria-labelledby="default-ground-label" aria-describedby="default-ground-help">
+                  <button type="button" role="radio" aria-checked={$currentProject.defaultGround === undefined}
+                    title={$t('settings.defaultGroundNone')} aria-label={$t('settings.defaultGroundNone')}
+                    onclick={() => updateProjectDefaultGround()}
+                    class="h-9 rounded-md border-2 bg-[#c8c2b8] text-[10px] text-gray-700 {$currentProject.defaultGround === undefined ? 'border-blue-500' : 'border-transparent hover:border-gray-300'}"
+                  >{$t('settings.defaultGroundNone')}</button>
+                  {#each landscapeMaterials as m (m.id)}
+                    <button type="button" role="radio" aria-checked={$currentProject.defaultGround === m.id}
+                      title={$t(m.labelKey)} aria-label={$t(m.labelKey)}
+                      onclick={() => updateProjectDefaultGround(m.id)}
+                      class="h-9 rounded-md border-2 bg-cover bg-center {$currentProject.defaultGround === m.id ? 'border-blue-500' : 'border-transparent hover:border-gray-300'}"
+                      style="background-color: {m.color}; background-image: url({catalogAssetUrl(`/textures/${landscapeTextureFiles[m.id]}`)})"
+                    ></button>
+                  {/each}
+                </div>
+                <p id="default-ground-help" class="text-xs text-gray-500 dark:text-gray-400">{$t('settings.defaultGroundHelp')}</p>
               </section>
             {/if}
           </div>

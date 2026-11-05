@@ -12,11 +12,13 @@
   import type { DetailTarget } from '$lib/models/types';
   import { catalogAssetUrl } from '$lib/utils/catalogAssetUrl';
 
-  import { currentProject, activeFloor, selectedElementId, selectedRoomId, updateWall, resizeWallLength, reverseWall, updateDoor, updateWindow, updateRoom, updateFurniture, detectedRoomsStore, updateStair, updateColumn, updateBackgroundImage, setBackgroundImage, calibrationMode, calibrationPoints, doorJoinMode, updateTextAnnotation, toggleFurnitureLock, updateEntourageItem, removeElement, elevationWallId } from '$lib/stores/project';
+  import { currentProject, activeFloor, selectedElementId, selectedRoomId, updateWall, resizeWallLength, reverseWall, updateDoor, updateWindow, updateRoom, updateFurniture, detectedRoomsStore, updateStair, updateColumn, updateBackgroundImage, setBackgroundImage, calibrationMode, calibrationPoints, doorJoinMode, updateTextAnnotation, toggleFurnitureLock, updateEntourageItem, removeElement, elevationWallId, updateLandscapeArea } from '$lib/stores/project';
+  import { polygonArea } from '$lib/utils/landscapeGeometry';
+  import { landscapeTextureFiles } from '$lib/utils/textureFiles';
   import { wallLength as calcWallLength, MIN_WALL_LENGTH, type WallEndpoint } from '$lib/utils/wallEditing';
   import { openingOnWall } from '$lib/utils/wallProfiles';
   import { getEntourageDef } from '$lib/utils/entourageCatalog';
-  import { floorMaterials, wallColors } from '$lib/utils/materials';
+  import { floorMaterials, wallColors, landscapeMaterials } from '$lib/utils/materials';
   import { doorFrameColor, windowFrameColor } from '$lib/utils/doorStyle';
   import FrameColorPicker from './FrameColorPicker.svelte';
   import { getCatalogItem } from '$lib/utils/furnitureCatalog';
@@ -57,6 +59,7 @@
   let selectedColumn = $derived(floor?.columns?.find(c => c.id === selId) ?? null);
   let selectedTextAnnotation = $derived(floor?.textAnnotations?.find(t => t.id === selId) ?? null);
   let selectedEntourage = $derived(floor?.entourage?.find(en => en.id === selId) ?? null);
+  let selectedLandscape = $derived(floor?.landscape?.find(a => a.id === selId) ?? null);
   let hasBgImage = $derived(!!floor?.backgroundImage);
   let selectedRoom = $derived(floor && selRoomId
     ? resolveRooms(floor, detectedRooms).find(r => r.id === selRoomId) ?? null
@@ -368,7 +371,7 @@
     { label: '🧶 Carpet', ids: ['carpet-beige', 'carpet-gray'] },
   ];
 
-  let hasSelection = $derived(!!selectedWall || !!selectedDoor || !!selectedWindow || !!selectedFurniture || !!selectedRoom || !!selectedStair || !!selectedColumn || !!selectedTextAnnotation || !!selectedEntourage || (!is3D && hasBgImage));
+  let hasSelection = $derived(!!selectedWall || !!selectedDoor || !!selectedWindow || !!selectedFurniture || !!selectedRoom || !!selectedStair || !!selectedColumn || !!selectedTextAnnotation || !!selectedEntourage || !!selectedLandscape || (!is3D && hasBgImage));
 </script>
 
 <!-- Right sidebar on md+; slides up as a bottom sheet on phones -->
@@ -904,6 +907,39 @@
           {/each}
         </div>
       </div>
+    </div>
+
+  {:else if selectedLandscape}
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <span class="w-6 h-6 bg-green-100 rounded flex items-center justify-center text-xs">🌱</span>
+      {$t('landscape.heading')}
+    </h3>
+    <div class="space-y-3">
+      <label class="block">
+        <span class="text-xs text-gray-500">{$t('landscape.name')}</span>
+        <input type="text" value={selectedLandscape.name ?? ''} placeholder={$t('landscape.namePlaceholder')} oninput={(e) => { if (selectedLandscape) updateLandscapeArea(selectedLandscape.id, { name: (e.target as HTMLInputElement).value }); }} class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
+      </label>
+      <div>
+        <span class="text-xs text-gray-500">{$t('roomProperties.area')}</span>
+        <p class="text-sm text-gray-700">{formatArea(Math.abs(polygonArea(selectedLandscape.points)) / 10000, settings.units)}</p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-500 mb-1.5 block">{$t('landscape.surface')}</span>
+        <div class="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={$t('landscape.surface')}>
+          {#each landscapeMaterials as m (m.id)}
+            <button
+              role="radio"
+              aria-checked={selectedLandscape.surface === m.id}
+              class="flex flex-col items-center gap-1 p-1 rounded-lg border-2 transition-colors {selectedLandscape.surface === m.id ? 'border-blue-500 bg-blue-50' : 'border-gray-100 hover:border-gray-300'}"
+              onclick={() => { if (selectedLandscape) updateLandscapeArea(selectedLandscape.id, { surface: m.id }); }}
+            >
+              <span class="w-full h-8 rounded bg-cover bg-center" style="background-color: {m.color}; background-image: url({catalogAssetUrl(`/textures/${landscapeTextureFiles[m.id]}`)})"></span>
+              <span class="text-[10px] text-gray-600">{$t(m.labelKey)}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+      <button onclick={() => { if (selectedLandscape) { removeElement(selectedLandscape.id); selectedElementId.set(null); } }} class="w-full px-2 py-1.5 border border-red-200 text-red-600 rounded text-sm hover:bg-red-50 transition-colors">{$t('landscape.delete')}</button>
     </div>
 
   {:else if selectedEntourage}

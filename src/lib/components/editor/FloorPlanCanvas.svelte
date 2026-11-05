@@ -10,7 +10,9 @@
   import { planContentBounds, hasPlanContent } from '$lib/utils/planContentBounds';
   import { connectedWallEndpoints } from '$lib/utils/wallEditing';
   import { createDrawScheduler } from '$lib/utils/drawScheduler';
-  import { activeFloor, selectedTool, selectedElementId, selectedElementIds, selectedRoomId, addWall, addDoor, addWindow, updateWall, moveWallEndpoint, moveWallGeometryDuringDrag, updateDoor, updateWindow, addFurniture, moveFurniture, transformFurnitureDuringDrag, rotateFurniture, rotateSelection, setFurnitureRotation, scaleFurniture, removeElement, placingFurnitureId, placingRotation, placingDoorType, placingWindowType, detectedRoomsStore, duplicateDoor, duplicateWindow, duplicateFurniture, duplicateSelection, pasteSelection, moveWallParallel, splitWall, wallSplitIntersectsOpening, snapEnabled, placingStair, addStair, moveStair, updateStair, placingColumn, placingColumnShape, addColumn, moveColumn, updateColumn, calibrationMode, calibrationPoints, updateBackgroundImage, setBackgroundImage, canvasZoom, canvasMinimumZoom, canvasCamX, canvasCamY, panMode, showFurnitureStore, addGuide, moveGuide, removeGuide, beginUndoGroup, endUndoGroup, layerVisibility, updateRoom, addMeasurement, updateMeasurement, removeMeasurement, addAnnotation, removeAnnotation, updateAnnotation, addTextAnnotation, removeTextAnnotation, updateTextAnnotation, moveTextAnnotation, toggleFurnitureLock, toggleSelectionLock, createGroup, ungroupElements, findGroupForElement, placingEntourageId, addEntourageItem, moveEntourage, resizeEntourage, currentProject, elevationWallId, elevationPickMode, doorJoinMode, joinScanDoors } from '$lib/stores/project';
+  import { activeFloor, selectedTool, selectedElementId, selectedElementIds, selectedRoomId, addWall, addDoor, addWindow, updateWall, moveWallEndpoint, moveWallGeometryDuringDrag, updateDoor, updateWindow, addFurniture, moveFurniture, transformFurnitureDuringDrag, rotateFurniture, rotateSelection, setFurnitureRotation, scaleFurniture, removeElement, placingFurnitureId, placingRotation, placingDoorType, placingWindowType, detectedRoomsStore, duplicateDoor, duplicateWindow, duplicateFurniture, duplicateSelection, pasteSelection, moveWallParallel, splitWall, wallSplitIntersectsOpening, snapEnabled, placingStair, addStair, moveStair, updateStair, placingColumn, placingColumnShape, addColumn, moveColumn, updateColumn, calibrationMode, calibrationPoints, updateBackgroundImage, setBackgroundImage, canvasZoom, canvasMinimumZoom, canvasCamX, canvasCamY, panMode, showFurnitureStore, addGuide, moveGuide, removeGuide, beginUndoGroup, endUndoGroup, layerVisibility, updateRoom, addMeasurement, updateMeasurement, removeMeasurement, addAnnotation, removeAnnotation, updateAnnotation, addTextAnnotation, removeTextAnnotation, updateTextAnnotation, moveTextAnnotation, toggleFurnitureLock, toggleSelectionLock, createGroup, ungroupElements, findGroupForElement, placingEntourageId, addEntourageItem, moveEntourage, resizeEntourage, currentProject, elevationWallId, elevationPickMode, doorJoinMode, joinScanDoors, addLandscapeArea, moveLandscapeArea, moveLandscapeVertices, landscapeIsValid, landscapeSurfaceStore } from '$lib/stores/project';
+  import { cornersAt, findLandscapeAt, snapToLandscape } from '$lib/utils/landscapeGeometry';
+  import { drawLandscape, drawLandscapeLabels, drawLandscapePreview } from '$lib/utils/landscapeRenderer';
   import type { Point, Wall, Door, Window as Win, FurnitureItem, Stair, Column, GuideLine, Measurement, Annotation, TextAnnotation, CustomEntourageDef } from '$lib/models/types';
   import type { Floor, Room } from '$lib/models/types';
   import { resolveRoomGeometry, roomLabelPosition, roomCentroid } from '$lib/utils/roomDetection';
@@ -32,7 +34,7 @@
   import { projectSettings, formatLength, formatArea } from '$lib/stores/settings';
   import type { ProjectSettings, SnapStep } from '$lib/stores/settings';
   import { snapStatus, cycleSnapStep } from '$lib/utils/snapStep';
-  import { angleSnapWithin, resizeFurnitureFromHandle, snap as _snap, type CanvasState } from '$lib/utils/canvasInteraction';
+  import { angleSnapWithin, MAGNETIC_SNAP as LANDSCAPE_MAGNET, resizeFurnitureFromHandle, snap as _snap, type CanvasState } from '$lib/utils/canvasInteraction';
   import { drawWall as _drawWall, drawDoorOnWall as _drawDoorOnWall, drawWindowOnWall as _drawWindowOnWall, drawDoorDistanceDimensions as _drawDoorDistanceDimensions, drawWindowDistanceDimensions as _drawWindowDistanceDimensions, drawFurnitureItem, drawStair as _drawStair, drawColumn as _drawColumn, drawGuides as _drawGuides, drawPersistedMeasurements as _drawPersistedMeasurements, drawTextAnnotations as _drawTextAnnotations, drawAnnotation as _drawAnnotation, drawAnnotations as _drawAnnotations, drawRooms as _drawRooms, drawWallJoints as _drawWallJoints, drawSnapPoints as _drawSnapPoints, drawMinimap as _drawMinimap, drawEntourageItems as _drawEntourageItems, drawEntourageGhost as _drawEntourageGhost, drawFloorBelowGhost as _drawFloorBelowGhost, entourageAspect } from '$lib/utils/canvasRenderer';
   import { getEntourageDef } from '$lib/utils/entourageCatalog';
   import { translatedOpeningPosition } from '$lib/utils/openingTranslation';
@@ -76,6 +78,14 @@
   // Digits typed while drawing a wall — Enter places the wall at exactly this length (issue #6)
   let typedWallLength = $state('');
   let wallSequenceFirst: Point | null = $state(null);
+  // Landscape drawing state: corners placed so far with the landscape tool
+  let landscapePoints: Point[] = $state([]);
+  let landscapeSurface = $state<string>('grass');
+  onDestroy(landscapeSurfaceStore.subscribe(v => { landscapeSurface = v; }));
+  // Landscape editing: whole-area drag and joined-corner drag, with the positions to restore on an invalid drop
+  let draggingLandscape: { id: string; start: Point; moved: Point } | null = $state(null);
+  let draggingLandscapeCorner: { moves: { areaId: string; index: number }[]; origin: Point; anchor: Point | null } | null = $state(null);
+  let landscapeBlocked = $state(false);
   let mousePos: Point = $state({ x: 0, y: 0 });
 
   // Inline room name editing
@@ -144,7 +154,7 @@
   let showRulers = $state(true);
 
   // Layer visibility toggles
-  let layerVis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, floorBelow: true, roomLabels: true });
+  let layerVis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, textAnnotations: true, entourage: true, landscape: true, floorBelow: true, roomLabels: true });
   // Sync showFurnitureStore ↔ layerVisibility.furniture
   let showFurniture = $derived(layerVis.furniture);
   $effect(() => { showFurnitureStore.set(layerVis.furniture); });
@@ -1165,7 +1175,9 @@
     const multiIds = currentSelectedIds;
     function isSelected(id: string) { return id === selId || multiIds.has(id); }
 
+    if (layerVis.landscape && floor.landscape?.length) drawLandscape(getCS(), floor.landscape, new Set([selId ?? '', ...multiIds]));
     drawRooms();
+    if (layerVis.landscape && floor.landscape?.length) drawLandscapeLabels(getCS(), floor.landscape);
     // Above the room fills, below this floor's own walls. Room floor textures
     // are opaque, so an underlay drawn before them vanishes the moment the
     // storey encloses a room — which is immediately, now that a new floor
@@ -1476,6 +1488,12 @@
 
     // Door/window placement preview
     if (placementPreview) drawPlacementPreview();
+
+    if (currentTool === 'landscape' && (landscapePoints.length || mousePos)) {
+      const cursor = snapLandscapePoint(mousePos);
+      const closing = landscapePoints.length >= 3 && Math.hypot(cursor.x - landscapePoints[0].x, cursor.y - landscapePoints[0].y) < 20;
+      drawLandscapePreview(getCS(), landscapePoints, cursor, landscapeSurface, closing);
+    }
 
     // Wall in progress — draw close indicator at first point
     if (wallSequenceFirst && wallStart && currentTool === 'wall' && (wallStart.x !== wallSequenceFirst.x || wallStart.y !== wallSequenceFirst.y)) {
@@ -1827,6 +1845,7 @@
         wallStart = null;
         wallSequenceFirst = null;
         typedWallLength = '';
+        landscapePoints = [];
       }
       currentTool = t;
       textAnnotationMode = t === 'text';
@@ -1853,6 +1872,7 @@
         ...(!v.textAnnotations ? currentFloor?.textAnnotations ?? [] : []),
         ...(!v.measurements ? currentFloor?.measurements ?? [] : []),
         ...(!v.annotations ? currentFloor?.annotations ?? [] : []),
+        ...(!v.landscape ? currentFloor?.landscape ?? [] : []),
       ].map(item => item.id));
       if (hiddenIds.size) {
         if (hiddenIds.has(selectedTextAnnotationId ?? '')) selectedTextAnnotationId = null;
@@ -2439,6 +2459,16 @@
       return;
     }
 
+    if (tool === 'landscape') {
+      const pt = snapLandscapePoint(wp);
+      if (landscapePoints.length >= 3 && Math.hypot(pt.x - landscapePoints[0].x, pt.y - landscapePoints[0].y) < 20) {
+        finishLandscapeOutline();
+      } else if (!landscapePoints.length || Math.hypot(pt.x - landscapePoints[landscapePoints.length - 1].x, pt.y - landscapePoints[landscapePoints.length - 1].y) > 5) {
+        landscapePoints = [...landscapePoints, pt];
+      }
+      return;
+    }
+
     if (tool === 'wall') {
       let endPt = snapWallEndPoint(wp);
       if (wallStart) endPt = applyTypedWallLength(endPt);
@@ -2500,6 +2530,18 @@
         }
       }
 
+      // Corner handles of a selected landscape area; joined corners of neighbouring areas move with it.
+      const selArea = layerVis.landscape ? currentFloor?.landscape?.find(a => a.id === currentSelectedId) : undefined;
+      if (!e.ctrlKey && !e.metaKey && selArea && currentFloor) {
+        const corner = selArea.points.find(p => Math.hypot(wp.x - p.x, wp.y - p.y) < 10 / zoom);
+        if (corner) {
+          const index = selArea.points.indexOf(corner);
+          const neighbours = selArea.points.length > 1
+            ? [selArea.points[(index - 1 + selArea.points.length) % selArea.points.length], selArea.points[(index + 1) % selArea.points.length]] : [];
+          draggingLandscapeCorner = { moves: cornersAt(corner, currentFloor.landscape ?? []), origin: { ...corner }, anchor: neighbours[0] ?? null };
+          return;
+        }
+      }
       // Selection handles come first: they belong to the already-selected element and are
       // drawn over everything, so they win over any element underneath them.
       const handle = findHandleAt(wp);
@@ -2641,6 +2683,10 @@
             const w = currentFloor!.walls.find(wall => wall.id === wid);
             if (w) roomDragStartPositions.set(wid, wallGeometryOf(w));
           }
+        } else if (layerVis.landscape && currentFloor?.landscape?.length && findLandscapeAt(wp, currentFloor.landscape)) {
+          const area = findLandscapeAt(wp, currentFloor.landscape)!;
+          if (selectElement(area.id, e.shiftKey)) return;
+          if (!e.shiftKey) draggingLandscape = { id: area.id, start: { ...wp }, moved: { x: 0, y: 0 } };
         } else {
           // Empty space — start marquee selection
           marqueeStart = { ...wp };
@@ -2737,6 +2783,10 @@
         }
       }
     }
+    if (currentTool === 'landscape') {
+      finishLandscapeOutline();
+      return;
+    }
     if (currentTool === 'wall' && wallStart && wallSequenceFirst) {
       // Auto-close the wall loop back to the first point if we have at least 2 walls
       if (Math.hypot(wallStart.x - wallSequenceFirst.x, wallStart.y - wallSequenceFirst.y) > 5) {
@@ -2763,7 +2813,8 @@
 
     if ((draggingWallEndpoint || draggingWallParallel || draggingCurveHandle || draggingRoomId
       || draggingStairId || draggingColumnId || draggingTextAnnotationId || draggingMultiSelect
-      || draggingDoorId || draggingWindowId || draggingGuideId || draggingEntourageId || resizingEntourageId) && !geometryGestureStarted) {
+      || draggingDoorId || draggingWindowId || draggingGuideId || draggingEntourageId || resizingEntourageId
+      || draggingLandscape || draggingLandscapeCorner) && !geometryGestureStarted) {
       if (Math.hypot(e.clientX - canvasPressPosition.x, e.clientY - canvasPressPosition.y) < 3) return;
       beginUndoGroup();
       geometryGestureStarted = true;
@@ -2882,6 +2933,16 @@
           if (currentFloor.entourage?.some(item => item.id === id)) moveEntourage(id, newPos);
         }
       }
+    }
+    if (draggingLandscape) {
+      const dx = snap(mousePos.x - draggingLandscape.start.x), dy = snap(mousePos.y - draggingLandscape.start.y);
+      moveLandscapeArea(draggingLandscape.id, dx - draggingLandscape.moved.x, dy - draggingLandscape.moved.y);
+      draggingLandscape.moved = { x: dx, y: dy };
+    }
+    if (draggingLandscapeCorner) {
+      const moving = new Set(draggingLandscapeCorner.moves.map(m => `${m.areaId}:${m.index}`));
+      const pt = e.altKey ? { x: mousePos.x, y: mousePos.y } : snapLandscapePoint(mousePos, draggingLandscapeCorner.anchor, (id, i) => moving.has(`${id}:${i}`));
+      moveLandscapeVertices(draggingLandscapeCorner.moves, pt);
     }
     if (draggingRoomId && currentFloor && roomDragStartPositions.size > 0) {
       const dx = snap(mousePos.x - roomDragStartMouse.x);
@@ -3088,10 +3149,22 @@
       endUndoGroup(draggingHandle === 'rotate' ? 'Rotated furniture' : draggingHandle ? 'Resized furniture' : 'Moved furniture');
       furnitureGestureStarted = false;
     }
+    if (geometryGestureStarted && (draggingLandscape || draggingLandscapeCorner)) {
+      // A drop that leaves areas overlapping or self-crossing goes back where it started, without a history step.
+      if (!landscapeIsValid()) {
+        if (draggingLandscape) moveLandscapeArea(draggingLandscape.id, -draggingLandscape.moved.x, -draggingLandscape.moved.y);
+        else moveLandscapeVertices(draggingLandscapeCorner!.moves, draggingLandscapeCorner!.origin);
+        landscapeBlocked = true;
+      }
+      endUndoGroup(draggingLandscape ? 'Moved landscape area' : 'Reshaped landscape area');
+      geometryGestureStarted = false;
+    }
     if (geometryGestureStarted) {
       endUndoGroup('Moved plan geometry');
       geometryGestureStarted = false;
     }
+    draggingLandscape = null;
+    draggingLandscapeCorner = null;
     draggingTextAnnotationId = null;
     draggingRoomId = null;
     roomDragStartPositions.clear();
@@ -3294,6 +3367,36 @@
     return endPt;
   }
 
+  /** Snapping for landscape corners: other areas' corners and edges first, then the wall magnet and grid,
+   *  then a 45° ray from `from` (the previous corner); Shift forces the ray. */
+  function snapLandscapePoint(raw: Point, from: Point | null = landscapePoints[landscapePoints.length - 1] ?? null,
+    skip?: (areaId: string, index: number) => boolean): Point {
+    if (currentSnapEnabled && currentFloor?.landscape?.length) {
+      const hit = snapToLandscape(raw, currentFloor.landscape, LANDSCAPE_MAGNET / zoom, skip);
+      if (hit) return hit;
+    }
+    const m = magneticSnap(raw);
+    if (m.snappedToEndpoint || m.snappedToWall || !from) return { x: m.x, y: m.y };
+    if (shiftDown) return angleSnapWithin(from, m, Infinity);
+    return angleSnap(from, m);
+  }
+
+  function finishLandscapeOutline() {
+    if (landscapePoints.length >= 3) {
+      const id = addLandscapeArea(landscapePoints, landscapeSurface as never);
+      if (id) {
+        selectedElementId.set(id);
+        selectedElementIds.set(new Set());
+        selectedRoomId.set(null);
+        landscapeBlocked = false;
+      } else {
+        landscapeBlocked = true;
+      }
+    }
+    landscapePoints = [];
+    markDirty();
+  }
+
   function typedWallLengthCm(): number | null {
     const v = parseFloat(typedWallLength);
     if (!isFinite(v) || v <= 0) return null;
@@ -3405,6 +3508,7 @@
       selectedRoomId.set(null);
       elevationPickMode.set(false);
       wallStart = null; wallSequenceFirst = null; typedWallLength = '';
+      landscapePoints = []; landscapeBlocked = false;
       placingFurnitureId.set(null);
       placingEntourageId.set(null);
       placingStair.set(false);
@@ -3874,6 +3978,8 @@
     pickingElevation ? 'crosshair' :
     draggingFurnitureId ? 'move' :
     draggingRoomId ? 'move' :
+    draggingLandscape ? 'move' :
+    draggingLandscapeCorner ? 'crosshair' :
     draggingMultiSelect ? 'move' :
     draggingDoorId ? 'move' :
     draggingWindowId ? 'move' :
@@ -4084,6 +4190,9 @@
     <button class="hover:text-gray-700" onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))} title={$t('canvasDisplay.furnitureHint')} aria-pressed={showFurniture}>
       {showFurniture ? '🪑' : '👻'} {$t('canvasDisplay.furniture')}
     </button>
+    <button class="hover:text-gray-700" onclick={() => layerVisibility.update(v => ({ ...v, landscape: !v.landscape }))} title={$t('canvasDisplay.landscapeHint')} aria-pressed={layerVis.landscape}>
+      <span class:opacity-40={!layerVis.landscape}>🌱</span> {$t('canvasDisplay.landscape')}
+    </button>
     <button class="hover:text-gray-700" onclick={() => showLayerPanel = !showLayerPanel} title={$t('layerVisibility.title')}>
       🗂 {$t('layers.title')}
     </button>
@@ -4098,7 +4207,7 @@
   {#if showLayerPanel}
     <div style:--visible-bottom={`${zoomControlsBottom}px`} class="absolute bottom-12 right-2 max-md:bottom-[calc(var(--visible-bottom)+6rem)] z-20 bg-white rounded-lg shadow-lg border border-gray-200 p-3 text-xs min-w-[160px]">
       <div class="font-semibold text-gray-700 mb-2">{$t('layers.title')}</div>
-      {#each [['walls',$t('layers.walls')],['doors',$t('layers.doors')],['windows',$t('layers.windows')],['furniture',$t('layers.furniture')],['stairs',$t('layers.stairs')],['columns',$t('layers.columns')],['guides',$t('layers.guides')],['measurements',$t('layers.measurements')],['annotations',$t('layerVisibility.dimensions')],['textAnnotations',$t('layers.textAnnotations')]] as [key, label]}
+      {#each [['walls',$t('layers.walls')],['doors',$t('layers.doors')],['windows',$t('layers.windows')],['furniture',$t('layers.furniture')],['landscape',$t('layers.landscape')],['stairs',$t('layers.stairs')],['columns',$t('layers.columns')],['guides',$t('layers.guides')],['measurements',$t('layers.measurements')],['annotations',$t('layerVisibility.dimensions')],['textAnnotations',$t('layers.textAnnotations')]] as [key, label]}
         <label class="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1">
           <input type="checkbox" checked={(layerVis as Record<string, boolean>)[key]} onchange={() => layerVisibility.update(v => ({ ...v, [key]: !(v as Record<string, boolean>)[key] }))} class="accent-blue-500" />
           <span>{label}</span>
@@ -4295,6 +4404,13 @@
       onclick={() => zoomToFit(true)}
     >⊡</button>
   </div>
+
+  {#if landscapeBlocked}
+    <div role="status" class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-md max-w-[90%]">
+      <span>{$t('landscape.overlapBlocked')}</span>
+      <button class="shrink-0 underline" onclick={() => { landscapeBlocked = false; }}>{$t('editorRecovery.dismiss')}</button>
+    </div>
+  {/if}
 
   {#if splitBlocked}
     <div role="status" class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-md max-w-[90%]">

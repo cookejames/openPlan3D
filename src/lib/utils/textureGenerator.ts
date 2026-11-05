@@ -1,4 +1,4 @@
-import { wallTextureFiles, floorTextureFiles } from './textureFiles';
+import { wallTextureFiles, floorTextureFiles, landscapeTextureFiles } from './textureFiles';
 import { catalogAssetUrl } from '$lib/utils/catalogAssetUrl';
 /**
  * High-quality texture generator for walls and floors.
@@ -506,14 +506,26 @@ const LEGACY_FLOOR_MAP: Record<string, string> = {
 export function getFloorTextureCanvas(materialId: string): HTMLCanvasElement | null {
   // Resolve legacy IDs to actual texture keys
   const resolvedId = LEGACY_FLOOR_MAP[materialId] || materialId;
-  const cacheKey = `photo-floor-${resolvedId}`;
-  if (cache.has(cacheKey)) return cache.get(cacheKey)!;
+  return photoCanvas(`floor-${resolvedId}`, FLOOR_TEXTURES[resolvedId]);
+}
 
-  const url = FLOOR_TEXTURES[resolvedId];
+const LANDSCAPE_TEXTURES: Record<string, string> = Object.fromEntries(
+  Object.entries(landscapeTextureFiles).map(([id, file]) => [id, catalogAssetUrl(`/textures/${file}`)])
+);
+
+/** Photo texture of a landscaping surface, or null while it loads (callers show the flat colour). */
+export function getLandscapeTextureCanvas(surface: string): HTMLCanvasElement | null {
+  return photoCanvas(`landscape-${surface}`, LANDSCAPE_TEXTURES[surface]);
+}
+
+/** Canvas copy of the photo at url, or null while it loads; a finished load calls notifyTextureLoad(). */
+function photoCanvas(loadKey: string, url: string | undefined): HTMLCanvasElement | null {
+  const cacheKey = `photo-${loadKey}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey)!;
   if (!url) return null;
 
-  if (imageCache.has(`floor-${resolvedId}`)) {
-    const img = imageCache.get(`floor-${resolvedId}`)!;
+  if (imageCache.has(loadKey)) {
+    const img = imageCache.get(loadKey)!;
     const c = document.createElement('canvas');
     c.width = img.naturalWidth; c.height = img.naturalHeight;
     const cx = c.getContext('2d')!;
@@ -522,7 +534,6 @@ export function getFloorTextureCanvas(materialId: string): HTMLCanvasElement | n
     return c;
   }
 
-  const loadKey = `floor-${resolvedId}`;
   if (!loadingSet.has(loadKey) && Date.now() >= (retryAfter.get(loadKey) ?? 0)) {
     loadingSet.add(loadKey);
     const img = new Image();

@@ -1,3 +1,5 @@
+import { drawLandscape } from './landscapeRenderer';
+import { getLandscapeMaterial } from './materials';
 import { prepareEntourageImage } from './entourageImages';
 import { translate, type Locale, type TranslationKey } from '$lib/i18n';
 import { furnitureName, customModelName } from '$lib/i18n/furnitureNames';
@@ -223,6 +225,10 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
         bounds.minX = Math.min(bounds.minX, b.minX); bounds.minY = Math.min(bounds.minY, b.minY);
         bounds.maxX = Math.max(bounds.maxX, b.maxX); bounds.maxY = Math.max(bounds.maxY, b.maxY);
       }
+      for (const p of (floor.landscape ?? []).flatMap(a => a.points)) {
+        bounds.minX = Math.min(bounds.minX, p.x); bounds.minY = Math.min(bounds.minY, p.y);
+        bounds.maxX = Math.max(bounds.maxX, p.x); bounds.maxY = Math.max(bounds.maxY, p.y);
+      }
       for(const {item,aspect} of entourage){const b=entouragePlanBounds(item,aspect);
         bounds.minX=Math.min(bounds.minX,b.minX-2);bounds.minY=Math.min(bounds.minY,b.minY-2);
         bounds.maxX=Math.max(bounds.maxX,b.maxX+2);bounds.maxY=Math.max(bounds.maxY,b.maxY+2);
@@ -250,6 +256,9 @@ export async function exportAsPNG(canvas: HTMLCanvasElement | null, project?: Pr
       ctx.scale(scale, scale);
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, w, h);
+
+      // Landscaping lies under everything else
+      if (floor.landscape?.length) drawLandscape({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor.landscape, new Set());
 
       // Draw room fills
       const ROOM_COLORS = ['#bfdbfe', '#fde68a', '#bbf7d0', '#fecaca', '#ddd6fe', '#a5f3fc', '#fed7aa'];
@@ -363,6 +372,10 @@ export function exportAsSVG(project: Project, language: Locale = 'en', visibilit
     svgBounds.minX = Math.min(svgBounds.minX, b.minX); svgBounds.minY = Math.min(svgBounds.minY, b.minY);
     svgBounds.maxX = Math.max(svgBounds.maxX, b.maxX); svgBounds.maxY = Math.max(svgBounds.maxY, b.maxY);
   }
+  for (const p of (floor.landscape ?? []).flatMap(a => a.points)) {
+    svgBounds.minX = Math.min(svgBounds.minX, p.x); svgBounds.minY = Math.min(svgBounds.minY, p.y);
+    svgBounds.maxX = Math.max(svgBounds.maxX, p.x); svgBounds.maxY = Math.max(svgBounds.maxY, p.y);
+  }
   for (const {item,aspect} of entourage) {
     const b=entouragePlanBounds(item,aspect);
     svgBounds.minX=Math.min(svgBounds.minX,b.minX-2);svgBounds.minY=Math.min(svgBounds.minY,b.minY-2);
@@ -382,6 +395,13 @@ export function exportAsSVG(project: Project, language: Locale = 'en', visibilit
   const vh = maxY - minY + pad * 2;
 
   let paths = '';
+
+  // Landscaping, under the rooms, in each surface's flat colour
+  for (const area of floor.landscape ?? []) {
+    if (area.points.length < 3) continue;
+    const pts = area.points.map(p => `${p.x - minX + pad},${p.y - minY + pad}`).join(' ');
+    paths += `  <polygon data-landscape="${escapeXml(area.id)}" points="${pts}" fill="${getLandscapeMaterial(area.surface).color}" stroke="#1e293b" stroke-opacity="0.45" stroke-width="1"/>\n`;
+  }
 
   // Room fills
   const ROOM_COLORS_SVG = ['#bfdbfe', '#fde68a', '#bbf7d0', '#fecaca', '#ddd6fe', '#a5f3fc', '#fed7aa'];

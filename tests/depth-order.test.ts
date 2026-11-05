@@ -18,3 +18,9 @@ it('lets plan-only symbols take no level from the furniture they overlap', () =>
   const outlet = { ...item(0, 0), catalogId: 'sym_outlet' } as FurnitureItem;
   expect(furnitureDepthOffsets([outlet, item(0, 0)])).toEqual([DEPTH_ORDER.furniture, DEPTH_ORDER.furniture]);
 });
+
+it('draws landscaping over the base plane and ground and under room floors', () => {
+  expect(DEPTH_ORDER.landscape).toBeGreaterThan(DEPTH_ORDER.roomFloor);
+  expect(DEPTH_ORDER.landscape).toBeLessThan(DEPTH_ORDER.basePlane);
+  expect(DEPTH_ORDER.landscape).toBeLessThan(DEPTH_ORDER.ground);
+});

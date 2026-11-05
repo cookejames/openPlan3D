@@ -437,6 +437,7 @@
                   "M          " + $t('shortcuts.measure'),
                   "N          " + $t('shortcuts.annotate'),
                   "T          " + $t('shortcuts.text'),
+                  "O          " + $t('shortcuts.landscape'),
                   "S          " + $t('shortcuts.snap'),
                   '',
                   '── ' + $t('shortcuts.edit') + ' ──',
@@ -506,6 +507,7 @@
                 <div class="flex justify-between"><span class="text-gray-600">{$t('shortcuts.measure')}</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">M</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">{$t('shortcuts.annotate')}</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">N</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">{$t('shortcuts.text')}</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">T</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">{$t('shortcuts.landscape')}</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">O</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">{$t('shortcuts.snap')}</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">S</kbd></div>
               </div>
 
